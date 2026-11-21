@@ -370,12 +370,12 @@ local personalPrompt="RAYNNA_NAMEPLATES_PERSONAL_SETUP"
 local function answerPersonalPrompt(enabled)
     if not A.db or not A.db.personalSetupPending then return end
     A.db.personal=enabled
-    A.db.personalSetupPending=nil
+    A.db.personalSetupPending=false
     A.Refresh()
     if A.SyncOptions then A.SyncOptions() end
 end
 StaticPopupDialogs[personalPrompt]={
-    text="Enable Raynna’s personal nameplate for this character?\n\nYou can change this later in /rnp under Personal.",
+    text="Enable Raynna's personal nameplate for this character?\n\nYou can change this later in /rnp under Personal.",
     button1=YES, button2=NO,
     OnAccept=function() answerPersonalPrompt(true) end,
     OnCancel=function(_,_,reason)
@@ -385,7 +385,7 @@ StaticPopupDialogs[personalPrompt]={
 }
 function A.FinishPersonalSetup()
     if A.db.personalSetupPending then
-        A.db.personalSetupPending=nil
+        A.db.personalSetupPending=false
         StaticPopup_Hide(personalPrompt)
     end
 end
@@ -403,6 +403,7 @@ events:SetScript("OnEvent", function(_, event)
             RaynnaNameplatesDB = A.NewProfile()
         end
         A.db = RaynnaNameplatesDB
+        if A.db.personalSetupPending==nil then A.db.personalSetupPending=true end
         for key, default in pairs({guildPosition="Above left", guildStyle="Gold tag", targetGlowSpread=18, targetGlowStyle="Soft outline", targetGlowStrength=100, targetColor="FFB31E", showLevelText=true, showHealthText=true, hideFullHealthText=false, healthFormat="Current + percent", wrapNames=false, nameWrapWidth=132, plateFont="Ubuntu Bold", textScale=100, previewEnemyPlayer=false, showSurname = true, personal = false, badges = true, spec = true, scale = 100}) do
             if A.db[key] == nil then A.db[key] = default end
         end
@@ -430,7 +431,7 @@ events:SetScript("OnEvent", function(_, event)
         A.RegisterSettings()
     end
     if not A.db then return end
-    if event=="PLAYER_ENTERING_WORLD" and A.db.personalSetupPending and not StaticPopup_Visible(personalPrompt) then
+    if event=="PLAYER_ENTERING_WORLD" and A.db.personalSetupPending and not (StaticPopup_Visible and StaticPopup_Visible(personalPrompt)) then
         StaticPopup_Show(personalPrompt)
     end
     if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
