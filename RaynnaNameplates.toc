@@ -1,0 +1,12 @@
+## Interface: 16001
+## IconTexture: Interface\Icons\Ability_Hunter_HuntersMark
+## Title: Raynna's Nameplates
+## Notes: Customizable WoW Forever nameplates with threat colours, cast bars, aura tracking and live previews.
+## Version: 1.0
+## OptionalDeps: Plater, Blizzard_AuraContainer
+## SavedVariablesPerCharacter: RaynnaNameplatesDB
+SettingsRegistry.lua
+Plates.lua
+World.lua
+Launcher.lua
+Settings.lua
