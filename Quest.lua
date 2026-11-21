@@ -1,5 +1,6 @@
 local _, A = ...
 local titles = {}
+local objectivesByQuest = {}
 local neededVendors = {}
 local vendorItemsByName = {}
 for id, item in pairs(A.vendorItems) do
@@ -15,9 +16,8 @@ local function markVendors(id)
     end
 end
 
-local function recordShoppingObjectives(questID)
-    if not C_QuestLog.GetQuestObjectives then return end
-    for _, objective in ipairs(C_QuestLog.GetQuestObjectives(questID) or {}) do
+local function recordShoppingObjectives(rows)
+    for _, objective in ipairs(rows) do
         if objective.type == "item" and not objective.finished and
             (not objective.numRequired or not objective.numFulfilled or objective.numFulfilled < objective.numRequired) then
             if objective.itemID or objective.objectID then
@@ -34,58 +34,100 @@ local function public(v)
 end
 local function clean(title)
     if not public(title) or type(title)~="string" then return nil end
-    return (title:gsub("|c%x%x%x%x%x%x%x%x",""):gsub("|r",""):gsub("^%[%d+[%+%-]?%]%s*",""))
+    return (title:gsub("|c%x%x%x%x%x%x%x%x",""):gsub("|r",""):gsub("|T.-|t",""):gsub("^%s+",""):gsub("^%[%d+[%+%-]?%]%s*",""))
 end
 function A.UpdateQuestTitles()
+    wipe(objectivesByQuest)
     wipe(titles)
     wipe(neededVendors)
     local log=C_QuestLog
     local count=log and log.GetNumQuestLogEntries or GetNumQuestLogEntries
     if not count then return end
     for i=1,count() do
-        local title,header,complete
+        local title,header,complete,questID
         if log and log.GetInfo then
             local info=log.GetInfo(i)
             if info then
                 title,header=info.title,info.isHeader
                 complete=info.questID and log.IsComplete and log.IsComplete(info.questID)
-                if info.questID and not header and not complete then recordShoppingObjectives(info.questID) end
+                questID=info.questID
             end
         elseif GetQuestLogTitle then
-            local name,_,_,isHeader,_,isComplete=GetQuestLogTitle(i)
+            local name,_,_,isHeader,_,isComplete,_,id=GetQuestLogTitle(i)
+            questID=id
             title,header,complete=name,isHeader,isComplete
         end
         local key=clean(title)
-        if key and not header and not complete then titles[key]=true end
-    end
-end
-function A.IsQuestNPC(unit)
-    if UnitIsPlayer(unit) then return false end
-    if C_QuestLog and C_QuestLog.UnitIsRelatedToActiveQuest then
-        local ok,related=pcall(C_QuestLog.UnitIsRelatedToActiveQuest,unit)
-        if ok and public(related) and related then return true end
-    end
-    if not next(titles) then return false end
-    local data=C_TooltipInfo and C_TooltipInfo.GetUnit and C_TooltipInfo.GetUnit(unit)
-    if data and public(data.lines) and (not canaccesstable or canaccesstable(data.lines)) then
-        for _,line in ipairs(data.lines) do
-            if public(line) and (not canaccesstable or canaccesstable(line)) and titles[clean(line.leftText)] then return true end
+        if key and not header and not complete then
+            local rows=questID and log and log.GetQuestObjectives and log.GetQuestObjectives(questID) or {}
+            titles[key]=rows
+            if questID then objectivesByQuest[questID]=rows end
+            recordShoppingObjectives(rows)
         end
     end
-    -- Questie supplies additional Forever NPC relationships when installed.
+end
+local function progress(text)
+    if not text then return end
+    local current,required=text:match("(%d+)%s*/%s*(%d+)")
+    if current and tonumber(required)>0 then return tonumber(current)>=tonumber(required) end
+end
+local function done(row)
+    return row.finished or (row.numRequired and row.numRequired>0 and row.numFulfilled and row.numFulfilled>=row.numRequired)
+        or progress(clean(row.text)) or false
+end
+local function objectiveName(text)
+    return (text:gsub("%d+%s*/%s*%d+",""):gsub("^%s+",""):gsub("[:%s]+$",""):lower())
+end
+function A.IsQuestNPC(unit)
+    if UnitIsPlayer(unit) or not next(titles) then return false end
+    local matched=false
     local module=QuestieLoader and QuestieLoader._modules and QuestieLoader._modules.QuestieTooltips
     local guid=UnitGUID(unit)
-    if module and module.GetTooltip and public(guid) and guid then
-        local id=select(6,strsplit("-",guid))
-        if id then
-            local ok,lines=pcall(module.GetTooltip,"m_"..id)
-            if ok and type(lines)=="table" then
-                for _,line in ipairs(lines) do
-                    local title=clean(line)
-                    if title and titles[(title:gsub("%s+%(%d+%)$",""))] then return true end
+    local id=public(guid) and guid and select(6,strsplit("-",guid))
+    local entries=module and module.lookupByKey and id and module.lookupByKey["m_"..id]
+    for _,entry in pairs(entries or {}) do
+        local rows=objectivesByQuest[entry.questId]
+        local obj=entry.objective
+        local row=rows and obj and rows[obj.Index]
+        if row and not obj.IsSourceItem and not obj.IsRequiredSourceItem then
+            matched=true
+            if not done(row) then return true end
+        end
+    end
+    local data=C_TooltipInfo and C_TooltipInfo.GetUnit and C_TooltipInfo.GetUnit(unit)
+    if data and public(data.lines) and (not canaccesstable or canaccesstable(data.lines)) then
+        local rows
+        for _,line in ipairs(data.lines) do
+            if public(line) and (not canaccesstable or canaccesstable(line)) then
+                local text=clean(line.leftText)
+                if text and titles[text] then
+                    rows=titles[text]
+                elseif rows and text then
+                    local name=objectiveName(text)
+                    local found=false
+                    for _,row in ipairs(rows) do
+                        local description=clean(row.text)
+                        if description and name~="" and objectiveName(description)==name then
+                            found=true
+                            matched=true
+                            if not done(row) then return true end
+                        end
+                    end
+                    if not found then
+                        local complete=progress(text)
+                        if complete~=nil then
+                            matched=true
+                            if not complete then return true end
+                        else rows=nil end
+                    end
                 end
             end
         end
+    end
+    if matched then return false end
+    if C_QuestLog and C_QuestLog.UnitIsRelatedToActiveQuest then
+        local ok,related=pcall(C_QuestLog.UnitIsRelatedToActiveQuest,unit)
+        return ok and public(related) and related or false
     end
     return false
 end

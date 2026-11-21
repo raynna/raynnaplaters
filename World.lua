@@ -615,6 +615,63 @@ local function servicePlaque(f,u,sampleName)
     end
     panel:Show()
 end
+local function playerCompanion(unit)
+    local own=UnitIsUnit("pet",unit)
+    if readable(own) and own then return true end
+    local other=UnitIsOtherPlayersPet and UnitIsOtherPlayersPet(unit)
+    if readable(other) and other then return true end
+    local minion=UnitIsMinion and UnitIsMinion(unit)
+    return readable(minion) and minion
+end
+local function companionCaption(f,unit)
+    if f.ownerCaption then return f.ownerCaption end
+    local now=GetTime()
+    if not f.nextOwnerCheck or now>=f.nextOwnerCheck then
+        f.nextOwnerCheck=now+3
+        local data=C_TooltipInfo and C_TooltipInfo.GetUnit and C_TooltipInfo.GetUnit(unit)
+        for _,line in ipairs(data and data.lines or {}) do
+            local title=line.leftText
+            if readable(title) and type(title)=="string" then
+                for _,key in ipairs({"UNITNAME_TITLE_PET","UNITNAME_TITLE_MINION","UNITNAME_TITLE_GUARDIAN"}) do
+                    local template=_G[key]
+                    if template then
+                        local prefix,suffix=template:match("^(.-)%%s(.-)$")
+                        if prefix and #title>#prefix+#suffix and title:sub(1,#prefix)==prefix
+                            and (#suffix==0 or title:sub(-#suffix)==suffix) then
+                            f.ownerCaption=title
+                            return title
+                        end
+                    end
+                end
+            end
+        end
+    end
+    return "Companion"
+end
+local function showCompanionText(f,u)
+    if not A.db.showCompanionText then return end
+    if not f.companionLabel then
+        local label=CreateFrame("Frame",nil,f)
+        label:SetAllPoints(f)
+        label.name=text(label,14,"nameText")
+        label.name:SetPoint("BOTTOM",label,"CENTER",0,0)
+        label.owner=text(label,11,"serviceText")
+        label.owner:SetPoint("TOP",label.name,"BOTTOM",0,-1)
+        label.owner:SetTextColor(.98,.82,.52)
+        f.companionLabel=label
+    end
+    local label=f.companionLabel
+    label.name:SetText(UnitName(u))
+    label.name:SetTextColor(color("friendly"))
+    label.owner:SetText(companionCaption(f,u))
+    label:Show()
+end
+local function friendlyNPCLayout(f,friendly,nonAttackable,companion,object,inCombat)
+    local interactive=f.quest or f.dialogQuest or f.talk or f.serviceTitle
+    local nameOnly=A.db.hideIdleNPCs and friendly and not interactive and not companion and not object and not inCombat
+    local compact=nonAttackable and interactive or companion or (friendly and A.db.compactFriendly)
+    return nameOnly,compact
+end
 local function refresh(f,u)
     if f.quest==nil then
         f.quest=A.IsQuestVendor(u) or A.IsQuestNPC(u)
@@ -626,11 +683,27 @@ local function refresh(f,u)
     end
     extraChat(f,nil,false)
     if f.servicePanel then f.servicePanel:Hide() end
+    if f.companionLabel then f.companionLabel:Hide() end
     local friendlyNPC=not UnitIsPlayer(u) and UnitIsFriend("player",u) and not UnitCanAttack("player",u)
-    f.combatLayout=f.serviceTitle~=nil or (A.db.compactFriendly and friendlyNPC)
+    local companion=friendlyNPC and A.db.compactCompanions and playerCompanion(u)
+    if friendlyNPC and A.db.compactCompanions and not companion and UnitPlayerControlled then
+        local controlled=UnitPlayerControlled(u)
+        if readable(controlled) and controlled then
+            companionCaption(f,u)
+            companion=f.ownerCaption~=nil
+        end
+    end
     f.npcInCombat=not not UnitAffectingCombat(u)
-    local object=isWorldObject(u)
-    f.objectOnly=object or (f.combatLayout and not f.npcInCombat)
+    local object=not companion and isWorldObject(u)
+    local pet=companion or (friendlyNPC and playerCompanion(u))
+    local controlled=friendlyNPC and UnitPlayerControlled and UnitPlayerControlled(u)
+    local exemptPet=pet or (readable(controlled) and controlled)
+    local nonAttackable=not UnitIsPlayer(u) and not UnitCanAttack("player",u)
+    local nameOnly
+    nameOnly,f.combatLayout=friendlyNPCLayout(f,friendlyNPC,nonAttackable,exemptPet,object,f.npcInCombat)
+    if exemptPet and not companion then f.combatLayout=A.db.compactFriendly and friendlyNPC end
+    f:SetShown(not f.outsideDistance)
+    f.objectOnly=nameOnly or object or (f.combatLayout and not f.npcInCombat)
     if f.townBadge then f.townBadge:Hide() end
     selectPlate(f,not f.objectOnly and UnitIsUnit(u,"target"))
     f.health:SetShown(not f.objectOnly)
@@ -645,7 +718,19 @@ local function refresh(f,u)
         f.cast:Hide()
         nativeAuras(f,nil,false)
         for _,icon in ipairs(f.icons) do icon:Hide() end
+        if companion then
+            if f.questBadge then f.questBadge:Hide() end
+            if f.objectLabel then f.objectLabel:Hide(); f.objectIcon:Hide() end
+            showCompanionText(f,u)
+            return
+        end
         objectLabel(f,u)
+        if nameOnly then
+            f.objectIcon:Hide()
+            if f.questBadge then f.questBadge:Hide() end
+            f.objectLabel:SetTextColor(color("friendly"))
+            return
+        end
         if not object then
             f.objectIcon:Hide()
             if not f.townBadge then
@@ -841,6 +926,7 @@ function A.RefreshPlateDistances()
         local distance,low,high
         if limit or show then distance,low,high=measureRange(unit,px,py,map) end
         local outside=limit and ((distance and distance>limit) or (low and low>=limit))
+        frame.outsideDistance=outside
         frame:SetShown(not outside)
         frame.distance:SetShown(show and not frame.objectOnly or false)
         if show and not frame.objectOnly then frame.distance:SetText(rangeText(distance,low,high)) end
@@ -853,6 +939,8 @@ local function attach(u)
     local f=pool[plate] or create(plate)
     if active[u] and active[u]~=f then detach(u) end
     if f.unit and f.unit~=u then detach(f.unit) end
+    f.ownerCaption,f.nextOwnerCheck=nil,nil
+    f.outsideDistance=nil
     f.serviceChecked=false
     f.quest=nil
     pool[plate],active[u],f.unit=f,f,u
@@ -1027,11 +1115,22 @@ local function applyCVar(key, saved, enabled, value)
         db[saved]=nil
     end
 end
+local function applyCompanionCVars(enabled)
+    for _,kind in ipairs({"Pets","Minions","Guardians"}) do
+        local current="nameplateShowFriendlyPlayer"..kind
+        local legacy="nameplateShowFriendly"..kind
+        local supported=GetCVar(current)~=nil
+        -- Restore any legacy override from 1.4.41 when the client has the player-specific setting.
+        applyCVar(legacy,"oldFriendly"..kind,enabled and not supported,"1")
+        if supported then applyCVar(current,"oldFriendlyPlayer"..kind,enabled,"1") end
+    end
+end
 function A.RefreshWorld()
     refreshPreview()
     for u,f in pairs(active) do refresh(f,u) end
     if InCombatLockdown() then return end
     local db=A.db
+    applyCompanionCVars(db.compactCompanions)
     applyCVar("nameplateShowFriendlyNpcs","oldFriendlyNPCs",db.townPlates,"1")
     applyCVar("nameplateShowAll","oldAlwaysShow",db.townPlates,"1")
     applyCVar("UnitNameOwn","oldName",db.hideName and db.personal,"0")
@@ -1078,7 +1177,7 @@ function A.InitWorld()
         local key=group[1]
         if A.db[key]==nil then A.db[key]=key=="targetScale" and 120 or 80 end
     end
-    for k,v in pairs({questTint=true,questIcon=true,quest="FFBE32",townPlates=true,compactFriendly=true,previewTarget=true,targetOutline=true,auraScale=100,power=true,buffs=true,casts=true,castTimer=true,castHeight=14,debuffs=true,hideName=false,hostile="CC0613",neutral="FFEB2B",friendly="70FF90",aggro="CC0613",pulling="FFEB2B",safe="C7CFD9",castColor="903BCC"}) do
+    for k,v in pairs({questTint=true,questIcon=true,quest="FFBE32",townPlates=true,hideIdleNPCs=true,compactCompanions=true,showCompanionText=true,compactFriendly=true,previewTarget=true,targetOutline=true,auraScale=100,power=true,buffs=true,casts=true,castTimer=true,castHeight=14,debuffs=true,hideName=false,hostile="CC0613",neutral="FFEB2B",friendly="70FF90",aggro="CC0613",pulling="FFEB2B",safe="C7CFD9",castColor="903BCC"}) do
         if A.db[k]==nil then A.db[k]=v end
     end
     for _,e in ipairs({"PLAYER_GUILD_UPDATE","GOSSIP_SHOW","QUEST_DETAIL","QUEST_PROGRESS","QUEST_COMPLETE","QUEST_LOG_UPDATE","UNIT_POWER_UPDATE","UNIT_MAXPOWER","UNIT_DISPLAYPOWER","NAME_PLATE_UNIT_ADDED","NAME_PLATE_UNIT_REMOVED","PLAYER_TARGET_CHANGED","UNIT_HEALTH","UNIT_MAXHEALTH","UNIT_NAME_UPDATE","UNIT_FACTION","UNIT_FLAGS","UNIT_AURA","UNIT_THREAT_LIST_UPDATE","UNIT_THREAT_SITUATION_UPDATE","UNIT_SPELLCAST_START","UNIT_SPELLCAST_STOP","UNIT_SPELLCAST_FAILED","UNIT_SPELLCAST_INTERRUPTED","UNIT_SPELLCAST_DELAYED","UNIT_SPELLCAST_CHANNEL_START","UNIT_SPELLCAST_CHANNEL_UPDATE","UNIT_SPELLCAST_CHANNEL_STOP","PLAYER_REGEN_ENABLED","PLAYER_REGEN_DISABLED"}) do events:RegisterEvent(e) end
@@ -1119,7 +1218,11 @@ events:SetScript("OnEvent",function(_,e,u)
         end
     elseif active[u] then
         local f=active[u]
-        if f.combatLayout and f.npcInCombat~=(not not UnitAffectingCombat(u)) then
+        if e=="UNIT_NAME_UPDATE" or e=="UNIT_FLAGS" or e=="UNIT_FACTION" then
+            f.quest=nil
+            f.serviceChecked=false
+        end
+        if f.npcInCombat~=(not not UnitAffectingCombat(u)) then
             refresh(f,u)
         elseif f.objectOnly then
             if e=="UNIT_NAME_UPDATE" or e=="UNIT_FLAGS" or e=="UNIT_FACTION" or e:find("HEALTH") then refresh(f,u) end

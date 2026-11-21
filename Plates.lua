@@ -350,7 +350,7 @@ function A.NewProfile()
         personal=false, personalSetupPending=true, unlock=false, scale=80, native=true, hideName=true, hideGuild=true,
         preview=false, previewTarget=true, previewFriendlyNPC=false, previewMode="enemyNPCScale", minimap=true,
         enemyNPCScale=80, friendlyNPCScale=80, friendlyPlayerScale=80, enemyPlayerScale=80, targetScale=100,
-        townPlates=true, compactFriendly=false, targetOutline=true, viewDistance=A.DistanceLimit(), showDistance=false,
+        townPlates=true, hideIdleNPCs=true, compactCompanions=true, showCompanionText=true, compactFriendly=false, targetOutline=true, viewDistance=A.DistanceLimit(), showDistance=false,
         guildPosition="Under name", guildStyle="Plain text", targetGlowSpread=12, targetGlowStyle="Soft outline", targetGlowStrength=100, targetColor="F4FFFB", showLevelText=true, showHealthText=true, hideFullHealthText=false, healthFormat="Current + percent", wrapNames=true, nameWrapWidth=132, plateFont="Ubuntu Bold", textScale=100, previewEnemyPlayer=false, showSurname=true, showGuild=true, badges=true, spec=true, iconSize=18, power=true,
         casts=true, castHeight=14, castTimer=true, castColor="903BCC",
         buffs=true, castableBuffs=true, debuffs=true, auraScale=100,
