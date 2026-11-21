@@ -166,6 +166,7 @@ function A.RegisterSettings()
         end
         local function addReset(r,key)
             button(r,"Reset",358,47,function()
+                if key=="personal" then A.FinishPersonalSetup() end
                 local value=A.NewProfile()[key]
                 if key=="buffs" or key=="castableBuffs" then
                     A.SetBuffOption(key,value)
@@ -187,6 +188,7 @@ function A.RegisterSettings()
             c:SetPoint("LEFT",0,0)
             c.Text:SetText(title)
             c:SetScript("OnClick",function()
+                if key=="personal" then A.FinishPersonalSetup() end
                 local enabled=not not c:GetChecked()
                 if key=="buffs" or key=="castableBuffs" then
                     A.SetBuffOption(key,enabled)

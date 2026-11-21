@@ -347,7 +347,7 @@ function A.NewProfile()
     local profile={
         powerHeight=5, powerValue=false, powerFormat="Current / max", personalPowerFormat="Current / max",
         personalPower=true, personalPowerHeight=5, personalPowerValue=true,
-        personal=true, unlock=false, scale=80, native=true, hideName=true, hideGuild=true,
+        personal=false, personalSetupPending=true, unlock=false, scale=80, native=true, hideName=true, hideGuild=true,
         preview=false, previewTarget=true, previewFriendlyNPC=false, previewMode="enemyNPCScale", minimap=true,
         enemyNPCScale=80, friendlyNPCScale=80, friendlyPlayerScale=80, enemyPlayerScale=80, targetScale=100,
         townPlates=true, compactFriendly=false, targetOutline=true, viewDistance=A.DistanceLimit(), showDistance=false,
@@ -365,6 +365,29 @@ function A.NewProfile()
     for _,role in ipairs(A.TextRoles) do profile[role[1]]=100 end
     A.InitEnemyOptions(profile)
     return profile
+end
+local personalPrompt="RAYNNA_NAMEPLATES_PERSONAL_SETUP"
+local function answerPersonalPrompt(enabled)
+    if not A.db or not A.db.personalSetupPending then return end
+    A.db.personal=enabled
+    A.db.personalSetupPending=nil
+    A.Refresh()
+    if A.SyncOptions then A.SyncOptions() end
+end
+StaticPopupDialogs[personalPrompt]={
+    text="Enable Raynna’s personal nameplate for this character?\n\nYou can change this later in /rnp under Personal.",
+    button1=YES, button2=NO,
+    OnAccept=function() answerPersonalPrompt(true) end,
+    OnCancel=function(_,_,reason)
+        if reason=="clicked" or reason==nil then answerPersonalPrompt(false) end
+    end,
+    timeout=0, whileDead=true, hideOnEscape=false,
+}
+function A.FinishPersonalSetup()
+    if A.db.personalSetupPending then
+        A.db.personalSetupPending=nil
+        StaticPopup_Hide(personalPrompt)
+    end
 end
 local events = CreateFrame("Frame")
 events:RegisterEvent("PLAYER_LOGIN")
@@ -407,6 +430,9 @@ events:SetScript("OnEvent", function(_, event)
         A.RegisterSettings()
     end
     if not A.db then return end
+    if event=="PLAYER_ENTERING_WORLD" and A.db.personalSetupPending and not StaticPopup_Visible(personalPrompt) then
+        StaticPopup_Show(personalPrompt)
+    end
     if event == "UNIT_HEALTH" or event == "UNIT_MAXHEALTH" then
         if player:IsShown() then updateHealth() end
     else

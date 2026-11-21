@@ -5,7 +5,7 @@ Spot your target in a crowd with a customizable target glow. Before combat, bar 
 - See health values and percentages, casts and channels, and player resources. Class badges can show a specialization when the client provides it.
 - See green-bordered buffs above the name and red-bordered debuffs below the bars, with timers beneath the icons. Filter helpful buffs to those your character can apply.
 - Portals and other non-combat objects use a compact icon and name label.
-- Adjust friendly NPCs, hostile NPCs, friendly players, and enemy players separately. The personal plate is enabled by default and can show health, resources, guild, and auras.
+- Adjust friendly NPCs, hostile NPCs, friendly players, and enemy players separately. On first use, each character can choose whether to enable the personal plate. It is customizable and can show health, resources, guild, and auras.
 - Compare four live previews while adjusting scale, colours, and aura size. Settings are searchable and saved per character.
 
 Type **/rnp** to open settings or **/rnp preview** to toggle the previews. You can also left-click the minimap button for settings or right-click it for previews.
