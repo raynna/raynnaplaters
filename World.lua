@@ -173,6 +173,53 @@ local function friendlyPlayer(unit)
     return not UnitCanAttack("player",unit) and UnitIsFriend("player",unit)
 end
 local threatStates={[0]="Low threat",[1]="Gaining aggro",[2]="Losing lead",[3]="Holding aggro"}
+local function positionThreat(f)
+    local label = f.threat
+    if not label or not label:IsShown() then return end
+    local position=A.db.threatPosition
+    label:ClearAllPoints()
+    if position=="Left of bar" then label:SetPoint("RIGHT",f.health,"LEFT",-5,0)
+    elseif position=="Above name" then label:SetPoint("BOTTOM",f.name,"TOP",0,2)
+    else label:SetPoint("LEFT",f.health,"RIGHT",5,0) end
+    local left, bottom, width, height = label:GetRect()
+    if not readable(left) or not readable(bottom) or not readable(width) or not readable(height)
+        or not left or not bottom or not width or not height then return end
+    local labelScale = label:GetEffectiveScale()
+    local intervals = {}
+    local function avoid(region)
+        if not region or not region:IsVisible() then return end
+        local x,y,w,h = region:GetRect()
+        if not readable(x) or not readable(y) or not readable(w) or not readable(h)
+            or not x or not y or not w or not h then return end
+        local scale = region:GetEffectiveScale()/labelScale
+        if (x+w)*scale > left-2 and x*scale < left+width+2 then
+            intervals[#intervals+1] = {y*scale-bottom-height-2,(y+h)*scale-bottom+2}
+        end
+    end
+    for _,icon in ipairs(f.icons or {}) do
+        avoid(icon)
+        avoid(icon.timer)
+    end
+    for _,entry in ipairs(f.nativeThreatIcons or {}) do
+        avoid(entry.icon)
+        avoid(entry.timer)
+    end
+    -- Merge blocked vertical offsets so moving past one icon also clears its neighbours.
+    table.sort(intervals,function(a,b) return a[1]<b[1] end)
+    local low,high
+    for _,span in ipairs(intervals) do
+        if not high or span[1]>high then
+            if high and low<0 and high>0 then break end
+            low,high=span[1],span[2]
+        else high=math.max(high,span[2]) end
+    end
+    if low and low<0 and high>0 then
+        local delta = high<=-low and high or low
+        local point,relative,anchor,x,y = label:GetPoint(1)
+        label:ClearAllPoints()
+        label:SetPoint(point,relative,anchor,x,y+delta)
+    end
+end
 local function showThreat(f,percent,tint)
     if not A.db.showThreat or not readable(percent) or type(percent) ~= "number" then
         if f.threat then f.threat:Hide() end
@@ -180,14 +227,10 @@ local function showThreat(f,percent,tint)
     end
     if not f.threat then f.threat=text(f,11,"threatText") end
     local label=f.threat
-    local position=A.db.threatPosition
-    label:ClearAllPoints()
-    if position=="Left of bar" then label:SetPoint("RIGHT",f.health,"LEFT",-5,0)
-    elseif position=="Above name" then label:SetPoint("BOTTOM",f.name,"TOP",0,2)
-    else label:SetPoint("LEFT",f.health,"RIGHT",5,0) end
     label:SetFormattedText("%d%%", math.floor(percent + .5))
     label:SetTextColor(color(tint))
     label:Show()
+    positionThreat(f)
 end
 local function mobGUID(unit)
     local guid = UnitGUID(unit)
@@ -527,6 +570,8 @@ local function nativeAuras(f,u,enabled)
                         timer:SetPoint("TOP",button,"BOTTOM",0,-1)
                         timer:SetWidth(0)
                         timer:SetWordWrap(false)
+                        f.nativeThreatIcons = f.nativeThreatIcons or {}
+                        table.insert(f.nativeThreatIcons,{icon=button,timer=timer})
                         button:SetDurationText(timer,{textFormatter=formatter})
                     end,
                     maxFrameCount=6,
@@ -655,6 +700,7 @@ local function auras(f,u,samples)
         end
     end
     for i=count+1,#f.icons do f.icons[i]:Hide() end
+    positionThreat(f)
 end
 function A.PersonalIndicators(frame)
     if not frame.cast then A.AddIndicators(frame) end
