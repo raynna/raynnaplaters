@@ -357,7 +357,7 @@ function A.NewProfile()
         buffs=true, castableBuffs=true, debuffs=true, auraScale=100,
         buffPosition="Top left", debuffPosition="Bottom left", controlPosition="Bottom left",
         questTint=true, questIcon=true, quest="FF00F5", hostile="CC0613", neutral="FFEB2B",
-        friendly="70FF90", aggro="CC0613", pulling="FFEB2B", safe="C7CFD9",
+        friendly="70FF90", aggro="CC0613", pulling="FFEB2B", partyAggro="56A8FF", safe="C7CFD9",
     }
     for key,option in pairs(personalOptions) do
         profile[option]=profile[key]~=false

@@ -365,7 +365,7 @@ function A.RegisterSettings()
             if example:IsVisible() then A.DrawAuraExample(example) end
         end
 
-        for _,option in ipairs({{"targetColor","Target highlight colour"},{"quest","Quest objective colour"},{"hostile","Hostile"},{"neutral","Neutral"},{"friendly","Friendly"},{"aggro","Have aggro"},{"pulling","Gaining aggro"},{"safe","No aggro"},{"castColor","Cast bar"}}) do
+        for _,option in ipairs({{"targetColor","Target highlight colour"},{"quest","Quest objective colour"},{"hostile","Hostile"},{"neutral","Neutral"},{"friendly","Friendly"},{"aggro","Have aggro"},{"pulling","Gaining aggro"},{"partyAggro","Party member has aggro"},{"safe","No aggro"},{"castColor","Cast bar"}}) do
             local key,title=option[1],option[2]
             local r=row(key=="targetColor" and "Targeting" or key=="castColor" and "Castbar" or "Colours",title,"color colour threat")
             addReset(r,key)

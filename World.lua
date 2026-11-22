@@ -173,8 +173,8 @@ local function friendlyPlayer(unit)
     return not UnitCanAttack("player",unit) and UnitIsFriend("player",unit)
 end
 local threatStates={[0]="Low threat",[1]="Gaining aggro",[2]="Losing lead",[3]="Holding aggro"}
-local function showThreat(f,status,percent)
-    if not A.db.showThreat or not readable(status) or not threatStates[status] then
+local function showThreat(f,status,percent,fallback,tint)
+    if not A.db.showThreat or (not threatStates[status] and not fallback) then
         if f.threat then f.threat:Hide() end
         return
     end
@@ -187,26 +187,44 @@ local function showThreat(f,status,percent)
     else label:SetPoint("LEFT",f.health,"RIGHT",5,0) end
     local format=A.db.threatFormat
     if format=="Status" or not readable(percent) or type(percent)~="number" then
-        label:SetText(threatStates[status])
+        label:SetText(fallback or threatStates[status])
     elseif format=="Percent" then label:SetFormattedText("%d%%",math.floor(percent+.5))
     else label:SetFormattedText("%s %d%%",threatStates[status],math.floor(percent+.5)) end
-    label:SetTextColor(color(status>=2 and "aggro" or status==1 and "pulling" or "safe"))
+    label:SetTextColor(color(tint or status>=2 and "aggro" or status==1 and "pulling" or "safe"))
     label:Show()
 end
-local function updateThreat(f,u)
-    local status,percent
-    if A.db.showThreat and not f.objectOnly and not UnitIsPlayer(u) and UnitCanAttack("player",u) and UnitAffectingCombat(u) then
-        if UnitDetailedThreatSituation then
-            local tanking
-            tanking,status,percent=UnitDetailedThreatSituation("player",u)
-        else
-            status=UnitThreatSituation("player",u)
+local function combatThreat(f,u)
+    local token=UnitIsUnit(u,"target") and "target" or u
+    local status,percent,tanking
+    if UnitDetailedThreatSituation then
+        tanking,status,percent=UnitDetailedThreatSituation("player",token)
+    end
+    if not readable(status) or not threatStates[status] then status=UnitThreatSituation("player",token) end
+    if not readable(status) or not threatStates[status] then status=nil end
+    if not readable(percent) then percent=nil end
+    local victim=token.."target"
+    local key,label
+    if (status and status>=2) or (readable(tanking) and tanking) then
+        key="aggro"
+        if not status then label="Holding aggro" end
+    elseif status==1 then key="pulling"
+    elseif UnitIsUnit(victim,"player") then key,label="aggro","Targeting you"
+    else
+        key="safe"
+        for i=1,GetNumSubgroupMembers() do
+            local member="party"..i
+            local rank=UnitThreatSituation(member,token)
+            if (readable(rank) and rank and rank>=2) or UnitIsUnit(victim,member) then
+                key="partyAggro"
+                if not status then label="Party aggro" end
+                break
+            end
         end
     end
-    showThreat(f,status,percent)
+    showThreat(f,status,percent,label or (not status and "Threat unknown"),key)
+    return key
 end
 local function paint(f,u)
-    updateThreat(f,u)
     local reaction = UnitReaction(u,"player")
     if not readable(reaction) then reaction=nil end
     local key = reaction and reaction <= 3 and "hostile" or reaction == 4 and "neutral" or "friendly"
@@ -216,13 +234,11 @@ local function paint(f,u)
     if UnitIsPlayer(u) then
         local _, class = UnitClass(u)
         local c = readable(class) and RAID_CLASS_COLORS[class]
-        if c then f.health:SetStatusBarColor(c.r,c.g,c.b) return end
+        if c then showThreat(f,nil); f.health:SetStatusBarColor(c.r,c.g,c.b) return end
     elseif key ~= "friendly" and UnitAffectingCombat(u) then
-        local t = UnitThreatSituation("player",u)
-        if readable(t) then
-            key = t and t >= 2 and "aggro" or t == 1 and "pulling" or "safe"
-        end
+        key=combatThreat(f,u)
     end
+    if UnitIsPlayer(u) or key=="friendly" or not UnitAffectingCombat(u) then showThreat(f,nil) end
     if f.quest and A.db.questTint and not UnitAffectingCombat(u) then key="quest" end
     f.health:SetStatusBarColor(color(key))
 end
@@ -1200,6 +1216,11 @@ function A.InitWorld()
         A.ApplyNativeDistance(A.db.viewDistance)
     end
     if not A.distanceTicker then
+        C_Timer.NewTicker(.5,function()
+            for token,frame in pairs(active) do
+                if not frame.objectOnly and not UnitIsPlayer(token) and UnitAffectingCombat(token) then paint(frame,token) end
+            end
+        end)
         A.distanceTicker=C_Timer.NewTicker(.2,function()
             if (A.db.viewDistance or A.db.showDistance) and next(active) then A.RefreshPlateDistances() end
         end)
@@ -1212,10 +1233,10 @@ function A.InitWorld()
         local key=group[1]
         if A.db[key]==nil then A.db[key]=key=="targetScale" and 120 or 80 end
     end
-    for k,v in pairs({showThreat=false,threatPosition="Right of bar",threatFormat="Status + percent",questTint=true,questIcon=true,quest="FFBE32",townPlates=true,hideIdleNPCs=true,compactCompanions=true,showCompanionText=true,compactFriendly=true,previewTarget=true,targetOutline=true,auraScale=100,power=true,buffs=true,casts=true,castTimer=true,castHeight=14,debuffs=true,hideName=false,hostile="CC0613",neutral="FFEB2B",friendly="70FF90",aggro="CC0613",pulling="FFEB2B",safe="C7CFD9",castColor="903BCC"}) do
+    for k,v in pairs({showThreat=false,threatPosition="Right of bar",threatFormat="Status + percent",questTint=true,questIcon=true,quest="FFBE32",townPlates=true,hideIdleNPCs=true,compactCompanions=true,showCompanionText=true,compactFriendly=true,previewTarget=true,targetOutline=true,auraScale=100,power=true,buffs=true,casts=true,castTimer=true,castHeight=14,debuffs=true,hideName=false,hostile="CC0613",neutral="FFEB2B",friendly="70FF90",aggro="CC0613",pulling="FFEB2B",partyAggro="56A8FF",safe="C7CFD9",castColor="903BCC"}) do
         if A.db[k]==nil then A.db[k]=v end
     end
-    for _,e in ipairs({"PLAYER_GUILD_UPDATE","GOSSIP_SHOW","QUEST_DETAIL","QUEST_PROGRESS","QUEST_COMPLETE","QUEST_LOG_UPDATE","UNIT_POWER_UPDATE","UNIT_MAXPOWER","UNIT_DISPLAYPOWER","NAME_PLATE_UNIT_ADDED","NAME_PLATE_UNIT_REMOVED","PLAYER_TARGET_CHANGED","UNIT_HEALTH","UNIT_MAXHEALTH","UNIT_NAME_UPDATE","UNIT_FACTION","UNIT_FLAGS","UNIT_AURA","UNIT_THREAT_LIST_UPDATE","UNIT_THREAT_SITUATION_UPDATE","UNIT_SPELLCAST_START","UNIT_SPELLCAST_STOP","UNIT_SPELLCAST_FAILED","UNIT_SPELLCAST_INTERRUPTED","UNIT_SPELLCAST_DELAYED","UNIT_SPELLCAST_CHANNEL_START","UNIT_SPELLCAST_CHANNEL_UPDATE","UNIT_SPELLCAST_CHANNEL_STOP","PLAYER_REGEN_ENABLED","PLAYER_REGEN_DISABLED"}) do events:RegisterEvent(e) end
+    for _,e in ipairs({"UNIT_TARGET","GROUP_ROSTER_UPDATE","PLAYER_GUILD_UPDATE","GOSSIP_SHOW","QUEST_DETAIL","QUEST_PROGRESS","QUEST_COMPLETE","QUEST_LOG_UPDATE","UNIT_POWER_UPDATE","UNIT_MAXPOWER","UNIT_DISPLAYPOWER","NAME_PLATE_UNIT_ADDED","NAME_PLATE_UNIT_REMOVED","PLAYER_TARGET_CHANGED","UNIT_HEALTH","UNIT_MAXHEALTH","UNIT_NAME_UPDATE","UNIT_FACTION","UNIT_FLAGS","UNIT_AURA","UNIT_THREAT_LIST_UPDATE","UNIT_THREAT_SITUATION_UPDATE","UNIT_SPELLCAST_START","UNIT_SPELLCAST_STOP","UNIT_SPELLCAST_FAILED","UNIT_SPELLCAST_INTERRUPTED","UNIT_SPELLCAST_DELAYED","UNIT_SPELLCAST_CHANNEL_START","UNIT_SPELLCAST_CHANNEL_UPDATE","UNIT_SPELLCAST_CHANNEL_STOP","PLAYER_REGEN_ENABLED","PLAYER_REGEN_DISABLED"}) do events:RegisterEvent(e) end
     if C_NamePlate then
         for _,plate in ipairs(C_NamePlate.GetNamePlates()) do
             if not plate:IsForbidden() then attach(plate.namePlateUnitToken) end
@@ -1228,6 +1249,7 @@ events:SetScript("OnEvent",function(_,e,u)
         A.ObserveConversation(e)
         e="QUEST_LOG_UPDATE"
     end
+    if e=="GROUP_ROSTER_UPDATE" then A.RefreshWorld(); return end
     if e=="PLAYER_GUILD_UPDATE" then A.Refresh(); return end
     if e=="QUEST_LOG_UPDATE" then
         if not A.questRefreshPending then
