@@ -142,6 +142,7 @@ function A.BuildDesigner(row, button, label, changed)
     grip:SetScript("OnMouseUp",function() window:StopMovingOrSizing() end)
     window:SetScript("OnHide",function() window:StopMovingOrSizing() end)
     local function open() window:Show();window:Raise() end
+    A.CloseDesigner=function() window:Hide() end
     A.OpenDesigner=open
     button(openRow,"Open designer",0,140,open)
     local toolbar=CreateFrame("Frame",nil,window)
@@ -307,7 +308,13 @@ function A.BuildDesigner(row, button, label, changed)
         if drag then drag=nil;sample.designerDragging=nil;changed();A.DrawAuraExample(sample) end
     end
     surface:SetScript("OnMouseUp",finish)
-    surface:SetScript("OnHide",finish)
+    surface:SetScript("OnHide",function()
+        if drag then
+            drag=nil
+            sample.designerDragging=nil
+            changed()
+        end
+    end)
     sample:SetScript("OnShow",function() A.DrawAuraExample(sample);sync() end)
     A.DrawAuraExample(sample)
     return function() if sample:IsVisible() then A.DrawAuraExample(sample) end end

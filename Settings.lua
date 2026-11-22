@@ -219,27 +219,43 @@ function A.RegisterSettings()
             field:SetScript("OnEscapePressed",function() field:ClearFocus();r.sync() end)
         end
         local refreshDesigner=A.BuildDesigner(row,button,label,changed)
-        local reset=button(page,"Reset all",0,94,function()
-            StaticPopup_Show("RAYNNA_NAMEPLATES_RESET_ALL")
+        local confirm=CreateFrame("Frame",nil,page)
+        confirm:SetPoint("BOTTOMRIGHT",-8,6)
+        confirm:SetSize(330,25)
+        confirm:Hide()
+        local reset
+        local function dismissReset()
+            confirm:Hide()
+            reset:Show()
+        end
+        reset=button(page,"Reset all",0,94,function()
+            if A.CloseDesigner then A.CloseDesigner() end
+            local focus=GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus()
+            if focus and focus.ClearFocus then focus:ClearFocus() end
+            reset:Hide()
+            confirm:Show()
         end)
         reset:ClearAllPoints()
         reset:SetPoint("BOTTOMRIGHT",page,"BOTTOMRIGHT",-8,6)
-        StaticPopupDialogs.RAYNNA_NAMEPLATES_RESET_ALL={
-            text="Reset all RaynnaÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢s Nameplates settings and designer positions for this character?",
-            button1="Reset all",button2=CANCEL,timeout=0,whileDead=true,hideOnEscape=true,
-            OnAccept=function()
-                local defaults=A.NewProfile()
-                for key in pairs(A.db) do
-                    if key~="confirmedGossipMenus" and key~="overheadVersion" and not key:match("^old") then A.db[key]=nil end
-                end
-                for key,value in pairs(defaults) do A.db[key]=value end
-                A.db.personalSetupPending=false
-                A.PositionLauncher()
-                A.ApplyNativeDistance(A.db.viewDistance)
-                A.previewColor=nil
-                A.SyncOptions(); changed(); layout(); refreshDesigner()
-            end,
-        }
+        label(confirm,"Reset this character's settings?",0)
+        button(confirm,CANCEL,175,72,dismissReset)
+        button(confirm,"Reset all",250,80,function()
+            dismissReset()
+            local defaults=A.NewProfile()
+            for key in pairs(A.db) do
+                if key~="confirmedGossipMenus" and key~="overheadVersion" and not key:match("^old") then A.db[key]=nil end
+            end
+            for key,value in pairs(defaults) do A.db[key]=value end
+            A.db.personalSetupPending=false
+            A.PositionLauncher()
+            A.ApplyNativeDistance(A.db.viewDistance)
+            A.previewColor=nil
+            A.SyncOptions(); changed(); layout(); refreshDesigner()
+        end)
+        page:HookScript("OnHide",function()
+            dismissReset()
+            if A.CloseDesigner then A.CloseDesigner() end
+        end)
         local distance=row("General","Nameplate view distance","NPCs monsters players range yards detection")
         addReset(distance,"viewDistance")
         label(distance,"Nameplate view distance",4)
