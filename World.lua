@@ -244,6 +244,18 @@ local function receiveThreat(prefix, guid, channel, sender)
     end
 end
 
+-- Forever can expose party targets before it supplies the observer's threat table.
+-- This fallback affects the bar colour only. Targeting never proves tanking.
+local function partyTargetsInCombat(mob)
+    for i = 1, GetNumSubgroupMembers() do
+        local member = "party"..i
+        local pet = "partypet"..i
+        if UnitIsUnit(member.."target", mob) and UnitAffectingCombat(member) then return true end
+        if UnitIsUnit(pet.."target", mob) and UnitAffectingCombat(pet) then return true end
+    end
+    return false
+end
+
 local function combatThreat(f,u)
     local token=mobThreatToken(u)
     local status,percent,tanking
@@ -283,6 +295,10 @@ local function combatThreat(f,u)
             and not UnitExists(victim) then
             key,label = "partyAggro","Party aggro"
         end
+    end
+    if key == "safe" and not UnitExists(victim) and not UnitExists(u.."target")
+        and partyTargetsInCombat(u) then
+        key = "partyAggro"
     end
     showThreat(f,status,percent,label,key)
     return key
