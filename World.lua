@@ -189,26 +189,39 @@ local function showThreat(f,percent,tint)
     label:SetTextColor(color(tint))
     label:Show()
 end
+local function mobGUID(unit)
+    local guid = UnitGUID(unit)
+    if readable(guid) and type(guid) == "string" then return guid end
+end
+
+local function sameThreatUnit(first, second)
+    local same = UnitIsUnit(first, second)
+    if readable(same) and same then return true end
+    local guid = mobGUID(first)
+    return guid ~= nil and guid == mobGUID(second)
+end
+
 local function mobThreatToken(u)
     for _, alias in ipairs({"target", "mouseover", "focus", "pettarget"}) do
-        if UnitIsUnit(alias, u) then return alias end
+        if sameThreatUnit(alias, u) then return alias end
     end
     for i = 1, GetNumSubgroupMembers() do
         local alias = "party"..i.."target"
-        if UnitIsUnit(alias, u) then return alias end
+        if sameThreatUnit(alias, u) then return alias end
         alias = "partypet"..i.."target"
-        if UnitIsUnit(alias, u) then return alias end
+        if sameThreatUnit(alias, u) then return alias end
     end
     return u
 end
 
-local function holdsThreat(member, mob)
+local function holdsThreat(member, mob, allowEngaged)
     if not UnitExists(member) then return false end
-    if UnitIsUnit(mob.."target", member) then return true end
+    if sameThreatUnit(mob.."target", member) then return true end
     if UnitDetailedThreatSituation then
-        local tanking, rank = UnitDetailedThreatSituation(member, mob)
+        local tanking, rank, _, _, amount = UnitDetailedThreatSituation(member, mob)
         if readable(tanking) and tanking then return true end
         if readable(rank) and rank and rank >= 2 then return true end
+        if allowEngaged and readable(amount) and type(amount)=="number" and amount>0 then return true end
     end
     local rank = UnitThreatSituation(member, mob)
     return readable(rank) and rank and rank >= 2
@@ -219,10 +232,6 @@ end
 local threatPrefix = "RNPThreat1"
 local reports, lastSent = {}, {}
 local shareThreat
-local function mobGUID(unit)
-    local guid = UnitGUID(unit)
-    if readable(guid) and type(guid) == "string" then return guid end
-end
 
 local function receiveThreat(prefix, guid, channel, sender)
     if prefix ~= threatPrefix or channel ~= "PARTY" or #guid > 100 then return end
@@ -246,8 +255,8 @@ local function partyTargetsInCombat(mob)
     for i = 1, GetNumSubgroupMembers() do
         local member = "party"..i
         local pet = "partypet"..i
-        if UnitIsUnit(member.."target", mob) and UnitAffectingCombat(member) then return true end
-        if UnitIsUnit(pet.."target", mob) and UnitAffectingCombat(pet) then return true end
+        if sameThreatUnit(member.."target", mob) and UnitAffectingCombat(member) then return true end
+        if sameThreatUnit(pet.."target", mob) and UnitAffectingCombat(pet) then return true end
     end
     return false
 end
@@ -266,15 +275,16 @@ local function combatThreat(f,u)
     if (status and status>=2) or (readable(tanking) and tanking) then
         key="aggro"
     elseif status==1 then key="pulling"
-    elseif UnitIsUnit(victim,"player") then key="aggro"
+    elseif sameThreatUnit(victim,"player") then key="aggro"
     else
         key="safe"
+        local allowEngaged = not UnitExists(victim) and not UnitExists(u.."target")
         for i=1,GetNumSubgroupMembers() do
             local member="party"..i
-            if holdsThreat(member,token) or (token~=u and holdsThreat(member,u)) then
+            if holdsThreat(member,token,allowEngaged) or (token~=u and holdsThreat(member,u,allowEngaged)) then
                 key="partyAggro"
                 break
-            elseif holdsThreat("partypet"..i,token) or (token~=u and holdsThreat("partypet"..i,u)) then
+            elseif holdsThreat("partypet"..i,token,allowEngaged) or (token~=u and holdsThreat("partypet"..i,u,allowEngaged)) then
                 key="partyAggro"
                 break
             end
@@ -298,6 +308,33 @@ local function combatThreat(f,u)
     showThreat(f,percent,key)
     return key
 end
+local function diagnosticValue(value)
+    if not readable(value) then return "restricted" end
+    if value == nil then return "-" end
+    return tostring(value)
+end
+
+function A.PrintThreatSnapshot()
+    print("Raynna threat snapshot / party members "..GetNumSubgroupMembers())
+    for i=1,GetNumSubgroupMembers() do
+        local member = "party"..i
+        for _,unit in ipairs({member,"partypet"..i}) do
+            if UnitExists(unit) then
+                print(unit.." / combat "..diagnosticValue(UnitAffectingCombat(unit))
+                    .." / target "..diagnosticValue(UnitName(unit.."target")))
+            end
+        end
+    end
+    for unit,frame in pairs(active) do
+        if not frame.objectOnly and UnitCanAttack("player",unit) and not UnitIsPlayer(unit) then
+            local alias = mobThreatToken(unit)
+            print(diagnosticValue(UnitName(unit)).." / "..unit.." / alias "..alias
+                .." / victim "..diagnosticValue(UnitName(alias.."target"))
+                .." / party targeting in combat "..tostring(partyTargetsInCombat(unit)))
+        end
+    end
+end
+
 local function paint(f,u)
     local reaction = UnitReaction(u,"player")
     if not readable(reaction) then reaction=nil end

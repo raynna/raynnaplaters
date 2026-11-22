@@ -411,7 +411,8 @@ function A.RegisterSettings()
 end
 SLASH_RAYNNANAMEPLATES1="/rnp"
 SlashCmdList.RAYNNANAMEPLATES=function(msg)
-    if msg=="preview" then A.TogglePreview()
+    if msg=="threat" then A.PrintThreatSnapshot()
+    elseif msg=="preview" then A.TogglePreview()
     elseif msg=="anchor" then print(A.nativeAnchor and "Raynna: attached to the native personal resource plate." or "Raynna: using a screen position.")
     else registry:Open("raynnanameplates") end
 end
