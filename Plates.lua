@@ -359,7 +359,7 @@ function A.NewProfile()
         townPlates=true, hideIdleNPCs=true, compactCompanions=true, showCompanionText=true, compactFriendly=false, targetOutline=true, viewDistance=A.DistanceLimit(), showDistance=false,
         guildPosition="Under name", guildStyle="Plain text", targetGlowSpread=12, targetGlowStyle="Soft outline", targetGlowStrength=100, targetColor="F4FFFB", showLevelText=true, showHealthText=true, hideFullHealthText=false, healthFormat="Current + percent", wrapNames=true, nameWrapWidth=132, plateFont="Ubuntu Bold", textScale=100, previewEnemyPlayer=false, showSurname=true, showGuild=true, badges=true, spec=true, iconSize=18, power=true,
         casts=true, castHeight=14, castTimer=true, castColor="903BCC",
-        buffs=true, castableBuffs=true, debuffs=true, auraScale=100,
+        buffs=true, castableBuffs=true, debuffs=true, auraSweep=true, auraPulse=true, auraScale=100,
         buffPosition="Top left", debuffPosition="Bottom left", controlPosition="Bottom left",
         questTint=true, questIcon=true, quest="FF00F5", hostile="CC0613", neutral="FFEB2B",
         friendly="70FF90", aggro="CC0613", pulling="FFEB2B", partyAggro="56A8FF", safe="C7CFD9",

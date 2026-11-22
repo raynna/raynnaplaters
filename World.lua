@@ -446,11 +446,56 @@ local function describeAura(box)
     GameTooltip:AddLine(box.filter=="HELPFUL" and "Buff" or "Debuff",.75,.82,.88)
     GameTooltip:Show()
 end
+local function auraSweep(box,art)
+    if not box.rnpSweep then
+        local sweep=CreateFrame("Cooldown",nil,box,"CooldownFrameTemplate")
+        sweep:SetAllPoints(art)
+        sweep:EnableMouse(false)
+        sweep:SetHideCountdownNumbers(true)
+        sweep:SetDrawEdge(false)
+        sweep:SetSwipeColor(0,0,0,.58)
+        box.rnpSweep=sweep
+    end
+    return box.rnpSweep
+end
+
+local function pulseAura(box,remaining)
+    if A.db.auraPulse==false or not remaining or remaining<=0 or remaining>3 then
+        if box.rnpPulse then box.rnpPulse:Hide() end
+        return
+    end
+    if not box.rnpPulse then
+        local glow=box:CreateTexture(nil,"OVERLAY")
+        glow:SetAllPoints()
+        glow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+        glow:SetBlendMode("ADD")
+        glow:SetTexCoord(.16,.84,.16,.84)
+        glow:SetVertexColor(1,.82,.35)
+        box.rnpPulse=glow
+    end
+    box.rnpPulse:SetAlpha(.52+.44*math.cos(remaining*math.pi*3))
+    box.rnpPulse:Show()
+end
+
+local function nativePulse(sweep,elapsed)
+    sweep.rnpTick=(sweep.rnpTick or 0)+elapsed
+    if sweep.rnpTick<.1 then return end
+    sweep.rnpTick=0
+    local start,duration=sweep:GetCooldownTimes()
+    local remaining
+    if readable(start) and readable(duration) and type(start)=="number" and type(duration)=="number" and duration>0 then
+        remaining=(start+duration)/1000-GetTime()
+    end
+    pulseAura(sweep,remaining)
+end
+
 local function updateCountdown(box,elapsed)
     box.tick=(box.tick or 0)+elapsed
     if box.tick < .1 then return end
     box.tick=0
-    local seconds=math.ceil(box.expires-GetTime())
+    local remaining=box.expires-GetTime()
+    pulseAura(box,remaining)
+    local seconds=math.ceil(remaining)
     if seconds<=0 then box.timer:Hide(); box:SetScript("OnUpdate",nil); return end
     box.timer:SetText(seconds>=86400 and math.ceil(seconds/86400).."d" or seconds>=3600 and math.ceil(seconds/3600).."h" or seconds>=60 and math.ceil(seconds/60).."m" or seconds)
 end
@@ -575,6 +620,12 @@ local function nativeAuras(f,u,enabled)
                         art:SetPoint("BOTTOMRIGHT",-2,2)
                         art:SetTexCoord(.07,.93,.07,.93)
                         button:SetIcon(art)
+                        if button.SetDurationCooldown then
+                            local sweep=auraSweep(button,art)
+                            sweep:SetDrawSwipe(A.db.auraSweep~=false)
+                            button:SetDurationCooldown(sweep)
+                            if A.db.auraPulse~=false then sweep:SetScript("OnUpdate",nativePulse) end
+                        end
                         local timer=text(button,10,"auraText")
                         timer:SetPoint("TOP",button,"BOTTOM",0,-1)
                         timer:SetWidth(0)
@@ -603,6 +654,14 @@ local function nativeAuras(f,u,enabled)
         if not activeRows[signature] then
             container:SetEnabled(false)
             container:Hide()
+        end
+    end
+    for _,entry in ipairs(f.nativeThreatIcons or {}) do
+        local sweep=entry.icon.rnpSweep
+        if sweep then
+            sweep:SetDrawSwipe(A.db.auraSweep~=false)
+            sweep:SetScript("OnUpdate",A.db.auraPulse~=false and nativePulse or nil)
+            if A.db.auraPulse==false then pulseAura(sweep,nil) end
         end
     end
     return supported
@@ -695,11 +754,21 @@ local function auras(f,u,samples)
             box.art:SetTexture(a.icon)
             if readable(a.duration) and readable(a.expirationTime) and a.duration and a.duration>0 and a.expirationTime then
                 box.expires=a.expirationTime
+                if A.db.auraSweep~=false then
+                    local sweep=auraSweep(box,box.art)
+                    sweep:SetCooldown(a.expirationTime-a.duration,a.duration)
+                    sweep:Show()
+                elseif box.rnpSweep then box.rnpSweep:Hide() end
                 box.tick=1
                 box:SetScript("OnUpdate",updateCountdown)
                 box.timer:Show()
                 updateCountdown(box,0)
-            else box.timer:Hide(); box:SetScript("OnUpdate",nil) end
+            else
+                box.timer:Hide()
+                box:SetScript("OnUpdate",nil)
+                pulseAura(box,nil)
+                if box.rnpSweep then box.rnpSweep:Hide() end
+            end
             box:Show()
             if GameTooltip:IsOwned(box) then describeAura(box) end
             end
@@ -1438,7 +1507,7 @@ function A.InitWorld()
         local key=group[1]
         if A.db[key]==nil then A.db[key]=key=="targetScale" and 120 or 80 end
     end
-    for k,v in pairs({showThreat=true,threatPosition="Right of bar",questTint=true,questIcon=true,quest="FFBE32",townPlates=true,hideIdleNPCs=true,compactCompanions=true,showCompanionText=true,compactFriendly=true,previewTarget=true,targetOutline=true,auraScale=100,power=true,buffs=true,casts=true,castTimer=true,castHeight=14,debuffs=true,hideName=false,hostile="CC0613",neutral="FFEB2B",friendly="70FF90",aggro="CC0613",pulling="FFEB2B",partyAggro="56A8FF",safe="C7CFD9",castColor="903BCC"}) do
+    for k,v in pairs({showThreat=true,threatPosition="Right of bar",questTint=true,questIcon=true,quest="FFBE32",townPlates=true,hideIdleNPCs=true,compactCompanions=true,showCompanionText=true,compactFriendly=true,previewTarget=true,targetOutline=true,auraSweep=true,auraPulse=true,auraScale=100,power=true,buffs=true,casts=true,castTimer=true,castHeight=14,debuffs=true,hideName=false,hostile="CC0613",neutral="FFEB2B",friendly="70FF90",aggro="CC0613",pulling="FFEB2B",partyAggro="56A8FF",safe="C7CFD9",castColor="903BCC"}) do
         if A.db[k]==nil then A.db[k]=v end
     end
     for _,e in ipairs({"UNIT_TARGET","GROUP_ROSTER_UPDATE","PLAYER_GUILD_UPDATE","GOSSIP_SHOW","QUEST_DETAIL","QUEST_PROGRESS","QUEST_COMPLETE","QUEST_LOG_UPDATE","UNIT_POWER_UPDATE","UNIT_MAXPOWER","UNIT_DISPLAYPOWER","NAME_PLATE_UNIT_ADDED","NAME_PLATE_UNIT_REMOVED","PLAYER_TARGET_CHANGED","UNIT_HEALTH","UNIT_MAXHEALTH","UNIT_NAME_UPDATE","UNIT_FACTION","UNIT_FLAGS","UNIT_AURA","UNIT_THREAT_LIST_UPDATE","UNIT_THREAT_SITUATION_UPDATE","UNIT_SPELLCAST_START","UNIT_SPELLCAST_STOP","UNIT_SPELLCAST_FAILED","UNIT_SPELLCAST_INTERRUPTED","UNIT_SPELLCAST_DELAYED","UNIT_SPELLCAST_CHANNEL_START","UNIT_SPELLCAST_CHANNEL_UPDATE","UNIT_SPELLCAST_CHANNEL_STOP","PLAYER_REGEN_ENABLED","PLAYER_REGEN_DISABLED"}) do events:RegisterEvent(e) end
