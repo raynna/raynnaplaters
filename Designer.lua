@@ -8,8 +8,10 @@ local parts = {
     {"buffPosition","Buffs"}, {"debuffPosition","Debuffs"}, {"controlPosition","Crowd control"},
 }
 local states = setmetatable({}, {__mode="k"})
+local renderingDraft
 local function options(key)
-    return A.db.designer and A.db.designer[key]
+    local layout=renderingDraft or A.db.designer
+    return layout and layout[key]
 end
 function A.DesignerAura(key)
     local opt=options(key)
@@ -92,7 +94,7 @@ local function transform(region,key,owners)
     if not opt and not compensate then states[region]=nil end
 end
 function A.DesignPlate(frame)
-    if not A.db or (not A.db.designer and not frame.wasDesigned) then return end
+    if not A.db or (not renderingDraft and not A.db.designer and not frame.wasDesigned) then return end
     local owners=frame.designerOwners or {}
     frame.designerOwners=owners
     for _,part in ipairs(parts) do
@@ -101,7 +103,7 @@ function A.DesignPlate(frame)
     end
     for _,part in ipairs(parts) do transform(frame[part[1]],part[1],owners) end
     transform(frame.auraAnchor,"auraAnchor",owners)
-    frame.wasDesigned=A.db.designer~=nil
+    frame.wasDesigned=renderingDraft~=nil or A.db.designer~=nil
 end
 function A.DesignThreat(frame)
     transform(frame.threat,"threat",frame.designerOwners)
@@ -236,6 +238,63 @@ function A.BuildDesigner(row, button, label, changed)
         end
         return dx+(bestX or 0),dy+(bestY or 0)
     end
+    local barFor={value="health",powerValue="power",castText="cast",castTime="cast"}
+    local function union(a,b)
+        if not a then return b end
+        return {math.min(a[1],b[1]),math.min(a[2],b[2]),math.max(a[3],b[3]),math.max(a[4],b[4])}
+    end
+    local function overlaps(a,b)
+        return a[1]<b[3] and a[3]>b[1] and a[2]<b[4] and a[4]>b[2]
+    end
+    -- Place neighbours against the dragged group first, then against each
+    -- displaced group. Unaffected parts keep their mouse-down positions.
+    local function moveNeighbours(d,draft,dx,dy)
+        local moving=d.groups[d.key]
+        if not moving or (dx==0 and dy==0) then return end
+        local r=moving.rect
+        local fixed={{r[1]+dx,r[2]+dy,r[3]+dx,r[4]+dy}}
+        local function offset(key,x,y)
+            local base=d.base[key] or {x=0,y=0,scale=1}
+            local units=d.unitsByKey[key]
+            draft[key]={x=base.x+x/units,y=base.y+y/units,scale=base.scale}
+        end
+        for _,key in ipairs(moving.members) do
+            if key~=d.key then offset(key,dx,dy) end
+        end
+        local placed={[d.key]=true}
+        for index=1,#parts do
+            local obstacle=fixed[index]
+            if not obstacle then break end
+            for _,part in ipairs(parts) do
+                local key=part[1]
+                local group=d.groups[key]
+                if group and not placed[key] and overlaps(group.rect,obstacle) then
+                    local box=group.rect
+                    local best
+                    for _,other in ipairs(fixed) do
+                        for _,delta in ipairs({{other[1]-box[3]-2,0},{other[3]-box[1]+2,0},
+                            {0,other[2]-box[4]-2},{0,other[4]-box[2]+2}}) do
+                            local x,y=delta[1],delta[2]
+                            local rect={box[1]+x,box[2]+y,box[3]+x,box[4]+y}
+                            local clear=true
+                            for _,occupied in ipairs(fixed) do
+                                if overlaps(rect,occupied) then clear=false;break end
+                            end
+                            local distance=math.abs(x)+math.abs(y)
+                            if clear and (not best or distance<best.distance) then
+                                best={x=x,y=y,rect=rect,distance=distance}
+                            end
+                        end
+                    end
+                    if best then
+                        for _,member in ipairs(group.members) do offset(member,best.x,best.y) end
+                        fixed[#fixed+1]=best.rect
+                        placed[key]=true
+                    end
+                end
+            end
+        end
+    end
     local drag
     surface:SetScript("OnMouseDown",function(_,mouse)
         if mouse~="LeftButton" and mouse~="RightButton" then return end
@@ -247,35 +306,45 @@ function A.BuildDesigner(row, button, label, changed)
         local owner=region and region:GetParent() or sample.sample
         local units=owner:GetEffectiveScale()
         drag={mouse=mouse,key=key,x=x,y=y,scale=s,cx=cx,cy=cy,units=units,region=region}
-        if not region then
-            drag.icons={}
-            for _,icon in ipairs(sample.sample.icons or {}) do
-                if icon.designKey==key and icon:IsShown() then
-                    local point,parent,anchor,px,py=icon:GetPoint(1)
-                    table.insert(drag.icons,{icon=icon,point=point,parent=parent,anchor=anchor,
-                        x=px,y=py,width=icon:GetWidth(),height=icon:GetHeight()})
-                end
-            end
-        end
-        drag.targets={}
-        drag.rect=bounds(region)
+        drag.base=A.db.designer or {}
+        drag.targets,drag.groups,drag.unitsByKey,drag.icons={},{},{},{}
         local function addBounds(r,k)
             local b=bounds(r)
             if not b then return end
-            if k~=key then table.insert(drag.targets,b)
-            elseif not region then
-                local v=drag.rect
-                drag.rect=v and {math.min(v[1],b[1]),math.min(v[2],b[2]),math.max(v[3],b[3]),math.max(v[4],b[4])} or b
-            end
+            drag.unitsByKey[k]=r:GetParent():GetEffectiveScale()
+            if k~=key then table.insert(drag.targets,b) else drag.rect=union(drag.rect,b) end
+            -- A separately selected text label can be placed inside its own bar.
+            local groupKey=barFor[k] or k
+            if groupKey==barFor[key] and k~=key then return end
+            if k==key then groupKey=key end
+            local group=drag.groups[groupKey] or {members={}}
+            drag.groups[groupKey]=group
+            group.rect=union(group.rect,b)
+            if group.members[#group.members]~=k then table.insert(group.members,k) end
         end
         for _,part in ipairs(parts) do addBounds(sample.sample[part[1]],part[1]) end
-        for _,icon in ipairs(sample.sample.icons or {}) do addBounds(icon,icon.designKey) end
+        for _,icon in ipairs(sample.sample.icons or {}) do
+            if icon.designKey and icon:IsShown() then
+                addBounds(icon,icon.designKey)
+                local point,parent,anchor,px,py=icon:GetPoint(1)
+                drag.icons[#drag.icons+1]={icon=icon,key=icon.designKey,point=point,parent=parent,anchor=anchor,
+                    x=px,y=py,width=icon:GetWidth(),height=icon:GetHeight()}
+            end
+        end
         sample.designerDragging=true
         sync()
     end)
+    local function finish(commit)
+        if not drag then return end
+        local draft=drag.draft
+        drag=nil
+        sample.designerDragging=nil
+        if commit and draft then A.db.designer=draft;changed() end
+        if sample:IsVisible() then A.DrawAuraExample(sample);sync() end
+    end
     surface:SetScript("OnUpdate",function()
         if not drag then return end
-        if not IsMouseButtonDown(drag.mouse) then drag=nil;sample.designerDragging=nil;changed();A.DrawAuraExample(sample);return end
+        if not IsMouseButtonDown(drag.mouse) then finish(true);return end
         local cx,cy=GetCursorPosition()
         local factor=drag.units
         local dx,dy=cx-drag.cx,cy-drag.cy
@@ -288,33 +357,29 @@ function A.BuildDesigner(row, button, label, changed)
         else x,y=round(x+dx),round(y+dy) end
         if drag.lastX==x and drag.lastY==y and drag.lastScale==s then return end
         drag.lastX,drag.lastY,drag.lastScale=x,y,s
-        A.db.designer=A.db.designer or {}
-        A.db.designer[drag.key]={x=x,y=y,scale=s}
-        if drag.region then
-            A.DesignPlate(sample.sample)
-        else
-            local first=drag.icons[1]
-            for _,saved in ipairs(drag.icons) do
-                local ratio=s/drag.scale
-                local icon=saved.icon
-                icon:SetSize(saved.width*ratio,saved.height*ratio)
-                icon:SetPoint(saved.point,saved.parent,saved.anchor,
-                    saved.x+(x-drag.x)+(saved.x-first.x)*(ratio-1),saved.y+(y-drag.y))
-            end
+        local draft={}
+        for k,v in pairs(drag.base) do draft[k]=v end
+        draft[drag.key]={x=x,y=y,scale=s}
+        if drag.mouse=="LeftButton" then moveNeighbours(drag,draft,(x-drag.x)*factor,(y-drag.y)*factor) end
+        drag.draft=draft
+        renderingDraft=draft
+        A.DesignPlate(sample.sample)
+        renderingDraft=nil
+        local origins={}
+        for _,saved in ipairs(drag.icons) do
+            local base=drag.base[saved.key] or {x=0,y=0,scale=1}
+            local now=draft[saved.key] or base
+            local ratio=now.scale/base.scale
+            local origin=origins[saved.key] or saved.x
+            origins[saved.key]=origin
+            saved.icon:SetSize(saved.width*ratio,saved.height*ratio)
+            saved.icon:SetPoint(saved.point,saved.parent,saved.anchor,
+                saved.x+now.x-base.x+(saved.x-origin)*(ratio-1),saved.y+now.y-base.y)
         end
-        sync()
+        readout:SetText(("%+.0f, %+.0f   %d%%"):format(x,y,math.floor(s*100+.5)))
     end)
-    local function finish()
-        if drag then drag=nil;sample.designerDragging=nil;changed();A.DrawAuraExample(sample) end
-    end
-    surface:SetScript("OnMouseUp",finish)
-    surface:SetScript("OnHide",function()
-        if drag then
-            drag=nil
-            sample.designerDragging=nil
-            changed()
-        end
-    end)
+    surface:SetScript("OnMouseUp",function() finish(true) end)
+    surface:SetScript("OnHide",function() finish(false) end)
     sample:SetScript("OnShow",function() A.DrawAuraExample(sample);sync() end)
     A.DrawAuraExample(sample)
     return function() if sample:IsVisible() then A.DrawAuraExample(sample) end end
