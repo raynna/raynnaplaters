@@ -453,7 +453,8 @@ local function auraSweep(box,art)
         sweep:EnableMouse(false)
         sweep:SetHideCountdownNumbers(true)
         sweep:SetDrawEdge(false)
-        sweep:SetSwipeColor(0,0,0,.58)
+        sweep:SetReverse(true)
+        sweep:SetSwipeColor(.32,.32,.32,.72)
         box.rnpSweep=sweep
     end
     return box.rnpSweep
