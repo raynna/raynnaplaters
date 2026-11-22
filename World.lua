@@ -45,6 +45,7 @@ function A.AddIndicators(f)
         f.cast:SetPoint("TOPLEFT",last,"BOTTOMLEFT",0,-2)
         f.auraAnchor:ClearAllPoints()
         f.auraAnchor:SetPoint("TOPLEFT",f.cast:IsShown() and f.cast or last,"BOTTOMLEFT",0,-3)
+        A.DesignPlate(f)
     end
     f.power:SetScript("OnShow",layout)
     f.power:SetScript("OnHide",layout)
@@ -231,6 +232,7 @@ local function showThreat(f,percent,tint)
     label:SetTextColor(color(tint))
     label:Show()
     positionThreat(f)
+    A.DesignThreat(f)
 end
 local function mobGUID(unit)
     local guid = UnitGUID(unit)
@@ -457,7 +459,7 @@ local placementDefaults={buffPosition="Top left",debuffPosition="Bottom left",co
 function A.AuraPosition(key)
     return A.db[key] or placementDefaults[key]
 end
-local function anchorAura(widget,f,position,index,count,size,scale)
+local function anchorAura(widget,f,position,index,count,size,scale,key)
     local x=0
     local y=0
     local relative=f
@@ -494,6 +496,8 @@ local function anchorAura(widget,f,position,index,count,size,scale)
         if position:find("middle",1,true) then x=x+(width-count*size)/2
         elseif position:find("right",1,true) then x=x+width-count*size end
     end
+    local dx,dy = A.DesignerAura(key)
+    x,y=x+dx,y+dy
     widget:ClearAllPoints()
     widget:SetPoint("TOPLEFT",relative,anchor,x/scale,y/scale)
 end
@@ -522,16 +526,19 @@ local function nativeAuras(f,u,enabled)
     local buffFilter=A.db.castableBuffs and "HELPFUL|PLAYER" or "HELPFUL"
     local harmfulFilter="HARMFUL|PLAYER|!CROWD_CONTROL"
     local controlFilter="HARMFUL|PLAYER|CROWD_CONTROL"
-    local rows={}
+    local rows,placements={},{}
     local function addFilter(key,filter)
         local position=A.AuraPosition(key)
-        rows[position]=rows[position] or {}
-        table.insert(rows[position],filter)
+        local edited=A.db.designer and A.db.designer[key]
+        local group=edited and key or position
+        placements[group]={position,key}
+        rows[group]=rows[group] or {}
+        table.insert(rows[group],filter)
     end
     if supported then
         if A.PlateOption(f,"buffs") then addFilter("buffPosition",buffFilter) end
         if A.PlateOption(f,"debuffs") then
-            if A.AuraPosition("debuffPosition")==A.AuraPosition("controlPosition") then
+            if A.AuraPosition("debuffPosition")==A.AuraPosition("controlPosition") and not (A.db.designer and (A.db.designer.debuffPosition or A.db.designer.controlPosition)) then
                 addFilter("debuffPosition","HARMFUL|PLAYER")
             else
                 addFilter("debuffPosition",harmfulFilter)
@@ -540,7 +547,8 @@ local function nativeAuras(f,u,enabled)
         end
     end
     local activeRows={}
-    for position,filters in pairs(rows) do
+    for group,filters in pairs(rows) do
+        local position,key=unpack(placements[group])
         local signature=table.concat(filters,";")
         activeRows[signature]=true
         local container=f.auraLayouts[signature]
@@ -582,9 +590,10 @@ local function nativeAuras(f,u,enabled)
             end
             f.auraLayouts[signature]=container
         end
-        local scale=(A.db.auraScale or 100)/100
+        local _,_,mult=A.DesignerAura(key)
+        local scale=(A.db.auraScale or 100)*mult/100
         container:SetScale(scale)
-        anchorAura(container,f,position,0,6*#filters,21*scale,scale)
+        anchorAura(container,f,position,0,6*#filters,21*scale,scale,key)
         container:SetUnit(u)
         container:SetEnabled(true)
         container:Show()
@@ -662,16 +671,20 @@ local function auras(f,u,samples)
                 box.timer:SetPoint("TOP",box,"BOTTOM",0,-1)
                 f.icons[count]=box
             end
-            local size=math.floor(21*(A.db.auraScale or 100)/100+.5)
+            local key
+            if helpful then key="buffPosition"
+            elseif isControl(u,a) then key="controlPosition"
+            else key="debuffPosition" end
+            box.designKey=key
+            local _,_,mult=A.DesignerAura(key)
+            local size=math.floor(21*(A.db.auraScale or 100)*mult/100+.5)
             box:SetSize(size,size)
             A.SetPlateFont(box.timer, math.max(6,math.floor(size*.42)))
             box.timer:SetWidth(0)
             box.timer:SetWordWrap(false)
-            local key
-            if helpful then key="buffPosition"; top=top+1
-            elseif isControl(u,a) then key="controlPosition"; side=side+1
-            else key="debuffPosition"; bottom=bottom+1 end
+            if helpful then top=top+1 elseif key=="controlPosition" then side=side+1 else bottom=bottom+1 end
             local position=A.AuraPosition(key)
+            if A.db.designer and A.db.designer[key] then position=key end
             positions[position]=positions[position] or {}
             table.insert(positions[position],box)
             box.rim:SetColorTexture(.95,.15,.19,1)
@@ -696,11 +709,12 @@ local function auras(f,u,samples)
     end
     for position,icons in pairs(positions) do
         for index,icon in ipairs(icons) do
-            anchorAura(icon,f,position,index-1,#icons,icon:GetWidth(),1)
+            anchorAura(icon,f,A.AuraPosition(icon.designKey),index-1,#icons,icon:GetWidth(),1,icon.designKey)
         end
     end
     for i=count+1,#f.icons do f.icons[i]:Hide() end
     positionThreat(f)
+    A.DesignThreat(f)
 end
 function A.PersonalIndicators(frame)
     if not frame.cast then A.AddIndicators(frame) end
@@ -993,6 +1007,7 @@ local function refresh(f,u)
     A.Badge(f,u,f.name)
     cast(f,u)
     auras(f,u)
+    A.DesignPlate(f)
 end
 -- Blizzard pools unit frames independently of the nameplate anchors.
 local owners, hooked = {}, {}
@@ -1237,6 +1252,7 @@ local function drawSample(f,mode,previewSelected)
         {spellId=1822,name="Rake",icon=132152,duration=8,expirationTime=now+8},
         {spellId=122,icon=135848,duration=6,expirationTime=now+6}
     })
+    A.DesignPlate(f)
 end
 function A.DrawAuraExample(parent)
     if not parent.sample then
@@ -1258,7 +1274,24 @@ function A.DrawAuraExample(parent)
     elseif category=="Quests" then
         mode={key="enemyNPCScale",name="Quest objective",reaction="hostile",npc=true,objective=true}
     elseif category=="NPCs" and A.db.previewFriendlyNPC then mode=A.previewModes[2] end
+    if category=="Designer" then mode=A.previewModes[3] end
     drawSample(parent.sample,mode,category=="Targeting")
+    if category=="Designer" then
+        local f=parent.sample
+        f.quest=true
+        nameMarker(f)
+        f.distance:SetText("32 yd"); f.distance:Show()
+        f.level:Show(); f.value:Show()
+        f.power:Show()
+        if not f.powerValue then
+            f.powerValue=text(f.power,10,"resourceText")
+            f.powerValue:SetPoint("CENTER")
+        end
+        f.power:SetHeight(math.max(12,f.power:GetHeight()))
+        f.powerValue:SetText("75%"); f.powerValue:Show()
+        showThreat(f,85,"pulling")
+    end
+    A.DesignPlate(parent.sample)
     local scale=parent.sample:GetScale()*UIParent:GetEffectiveScale()/parent:GetEffectiveScale()
     parent.sample:SetScale(scale)
 end

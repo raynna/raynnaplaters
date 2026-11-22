@@ -1,6 +1,6 @@
 local _, A = ...
 local registry=RaynnaModsSettingsRegistry
-local groups={"General","Personal","NPCs","Players","Targeting","Quests","Auras","Castbar","Colours","Text"}
+local groups={"General","Personal","NPCs","Players","Targeting","Quests","Auras","Castbar","Colours","Text","Designer"}
 local function button(parent,caption,x,width,click)
     local b=CreateFrame("Button",nil,parent,"UIPanelButtonTemplate")
     b:SetPoint("LEFT",parent,"LEFT",x,0)
@@ -43,7 +43,7 @@ function A.RegisterSettings()
         nav:SetSize(400,52)
         local scroll=CreateFrame("ScrollFrame",nil,page,"UIPanelScrollFrameTemplate")
         scroll:SetPoint("TOPLEFT",16,-119)
-        scroll:SetPoint("BOTTOMRIGHT",-30,8)
+        scroll:SetPoint("BOTTOMRIGHT",-30,39)
         local body=CreateFrame("Frame",nil,scroll)
         body:SetSize(405,1)
         scroll:SetScrollChild(body)
@@ -74,9 +74,10 @@ function A.RegisterSettings()
                 minWidth=math.max(minWidth,440+sampleWidth*UIParent:GetEffectiveScale()/page:GetEffectiveScale())
             end
             local wide=not expanded and page:GetWidth()>=minWidth
-            local top=wide and 4 or 96
+            local top=wide and 4 or 124
             local height=expanded and 236 or 148
-            local contentTop=top+height+7
+            local contentTop=current=="Designer" and 124 or top+height+7
+            example:SetShown(current~="Designer")
             example:ClearAllPoints()
             example:SetPoint("TOPLEFT",page,"TOPLEFT",wide and 412 or 16,-top)
             example:SetPoint("TOPRIGHT",page,"TOPRIGHT",-8,-top)
@@ -88,7 +89,7 @@ function A.RegisterSettings()
             heading:SetPoint("TOPLEFT",20,-contentTop)
             scroll:ClearAllPoints()
             scroll:SetPoint("TOPLEFT",16,-contentTop-20)
-            scroll:SetPoint("BOTTOMRIGHT",-30,8)
+            scroll:SetPoint("BOTTOMRIGHT",-30,39)
         end
         local resizePreview=CreateFrame("Button",nil,example,"UIPanelButtonTemplate")
         resizePreview:SetPoint("TOPRIGHT",-3,-3)
@@ -216,6 +217,28 @@ function A.RegisterSettings()
             field:SetScript("OnEnterPressed",function() apply(tonumber((field:GetText():match("^%s*(%-?%d+)%s*%%?%s*$") or field:GetText():match("^%s*(%d+)%s*px%s*$")))) end)
             field:SetScript("OnEscapePressed",function() field:ClearFocus();r.sync() end)
         end
+        local refreshDesigner=A.BuildDesigner(row,button,label,changed)
+        local reset=button(page,"Reset all",0,94,function()
+            StaticPopup_Show("RAYNNA_NAMEPLATES_RESET_ALL")
+        end)
+        reset:ClearAllPoints()
+        reset:SetPoint("BOTTOMRIGHT",page,"BOTTOMRIGHT",-8,6)
+        StaticPopupDialogs.RAYNNA_NAMEPLATES_RESET_ALL={
+            text="Reset all RaynnaÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢s Nameplates settings and designer positions for this character?",
+            button1="Reset all",button2=CANCEL,timeout=0,whileDead=true,hideOnEscape=true,
+            OnAccept=function()
+                local defaults=A.NewProfile()
+                for key in pairs(A.db) do
+                    if key~="confirmedGossipMenus" and key~="overheadVersion" and not key:match("^old") then A.db[key]=nil end
+                end
+                for key,value in pairs(defaults) do A.db[key]=value end
+                A.db.personalSetupPending=false
+                A.PositionLauncher()
+                A.ApplyNativeDistance(A.db.viewDistance)
+                A.previewColor=nil
+                A.SyncOptions(); changed(); layout(); refreshDesigner()
+            end,
+        }
         local distance=row("General","Nameplate view distance","NPCs monsters players range yards detection")
         addReset(distance,"viewDistance")
         label(distance,"Nameplate view distance",4)

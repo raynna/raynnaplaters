@@ -208,10 +208,13 @@ background:SetPoint("BOTTOMRIGHT", 1, -1)
 background:SetColorTexture(0.08, 0.08, 0.09, 0.95)
 local health = CreateFrame("StatusBar", nil, player)
 health:SetAllPoints()
+background:ClearAllPoints()
+background:SetPoint("TOPLEFT",health,"TOPLEFT",-1,1)
+background:SetPoint("BOTTOMRIGHT",health,"BOTTOMRIGHT",1,-1)
 health:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
 local name, level, value = label(player,15,"nameText"), label(player,14,"levelText"), label(health,13,"healthText")
 player.health,player.healthBackground,player.level=health,background,level
-player.name=name
+player.name,player.value=name,value
 name:SetPoint("BOTTOMLEFT", player, "TOPLEFT", 0, 2)
 level:SetPoint("BOTTOMRIGHT", player, "TOPRIGHT", 0, 2)
 value:SetPoint("CENTER")
@@ -242,6 +245,7 @@ local function badge(owner, unit, anchor, enemy)
         icon = owner:CreateTexture(nil, "OVERLAY")
         icon:SetSize(18, 18)
         badges[owner] = icon
+        owner.classBadge=icon
     end
     local guild=owner.guild
     if owner.isPersonal and not A.db.personalName then anchor=owner end
@@ -329,6 +333,7 @@ function A.Refresh()
     if A.RefreshWorld then A.RefreshWorld() end
     if db.personal then A.PersonalIndicators(player) end
     badge(player, "player", name)
+    A.DesignPlate(player)
     if C_NamePlate and C_NamePlate.GetNamePlates then
         for _, plate in ipairs(C_NamePlate.GetNamePlates()) do if Plater then updatePlate(plate) end end
     end

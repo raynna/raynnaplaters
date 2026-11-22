@@ -19,6 +19,7 @@ function A.CreateLauncher()
         b:ClearAllPoints()
         b:SetPoint("CENTER",Minimap,"CENTER",math.cos(a)*(Minimap:GetWidth()/2+8),math.sin(a)*(Minimap:GetHeight()/2+8))
     end
+    A.PositionLauncher=position
     b:RegisterForClicks("LeftButtonUp","RightButtonUp")
     b:RegisterForDrag("LeftButton")
     b:SetScript("OnDragStart",function()
