@@ -21,14 +21,22 @@ end
 
 -- Remember the unedited anchors. Existing layouts can re-anchor a region when
 -- casts, guilds or resources appear, including while a custom layout is active.
+local function readAnchor(region,index)
+    if region.IsAnchoringRestricted and region:IsAnchoringRestricted() then return end
+    local ok,point,parent,anchor,x,y=pcall(region.GetPoint,region,index)
+    if ok and point and not (issecretvalue and (issecretvalue(x) or issecretvalue(y))) then
+        return point,parent,anchor,x,y
+    end
+end
 local function transform(region,key,owners)
-    if not region then return end
+    if not region or (region.IsAnchoringRestricted and region:IsAnchoringRestricted()) then return end
     local opt=options(key)
     local state=states[region]
     local compensate
     if owners then
         for i=1,region:GetNumPoints() do
-            local _,anchor=region:GetPoint(i)
+            local point,anchor=readAnchor(region,i)
+            if not point then return end
             if anchor and owners[anchor] and options(owners[anchor]) then compensate=true; break end
         end
     end
@@ -40,7 +48,8 @@ local function transform(region,key,owners)
     if count==0 then return end
     local points={}
     for i=1,count do
-        local point,parent,anchor,x,y=region:GetPoint(i)
+        local point,parent,anchor,x,y=readAnchor(region,i)
+        if not point then return end
         local old=state[point]
         if old and old.parent==parent and old.anchor==anchor and x==old.outX and y==old.outY then
             x,y=old.x,old.y
@@ -87,7 +96,8 @@ local function transform(region,key,owners)
         state[p.point]=p
     end
     for i=1,region:GetNumPoints() do
-        local point,parent,anchor,x,y=region:GetPoint(i)
+        local point,parent,anchor,x,y=readAnchor(region,i)
+        if not point then return end
         local p=state[point]
         p.parent,p.anchor,p.outX,p.outY=parent,anchor,x,y
     end

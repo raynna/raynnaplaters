@@ -26,6 +26,7 @@ function A.AddIndicators(f)
     f.auraAnchor = CreateFrame("Frame",nil,f)
     f.auraAnchor:SetSize(1,1)
     f.cast = bar(f,14)
+    f.cast:Hide()
     f.cast:SetPoint("TOPLEFT",f,"BOTTOMLEFT",0,-2)
     f.castText, f.castTime = text(f.cast,11,"castText"), text(f.cast,11,"castText")
     f.castText:SetPoint("LEFT",3,0)
@@ -36,7 +37,7 @@ function A.AddIndicators(f)
     f.cast:SetScript("OnUpdate",function(c)
         local now = GetTime()
         if f:GetParent().designerDragging then return end
-        if now >= c.finish then c:Hide() return end
+        if not c.start or not c.finish or now >= c.finish then c:Hide() return end
         c:SetValue(c.channel and c.finish-now or now-c.start)
         c:GetParent().castTime:SetFormattedText("%.1f",c.finish-now)
     end)
@@ -183,14 +184,18 @@ local function positionThreat(f)
     if position=="Left of bar" then label:SetPoint("RIGHT",f.health,"LEFT",-5,0)
     elseif position=="Above name" then label:SetPoint("BOTTOM",f.name,"TOP",0,2)
     else label:SetPoint("LEFT",f.health,"RIGHT",5,0) end
-    local left, bottom, width, height = label:GetRect()
+    if label.IsAnchoringRestricted and label:IsAnchoringRestricted() then return end
+    local ok,left,bottom,width,height=pcall(label.GetRect,label)
+    if not ok then return end
     if not readable(left) or not readable(bottom) or not readable(width) or not readable(height)
         or not left or not bottom or not width or not height then return end
     local labelScale = label:GetEffectiveScale()
     local intervals = {}
     local function avoid(region)
         if not region or not region:IsVisible() then return end
-        local x,y,w,h = region:GetRect()
+        if region.IsAnchoringRestricted and region:IsAnchoringRestricted() then return end
+        local ok,x,y,w,h=pcall(region.GetRect,region)
+        if not ok then return end
         if not readable(x) or not readable(y) or not readable(w) or not readable(h)
             or not x or not y or not w or not h then return end
         local scale = region:GetEffectiveScale()/labelScale
@@ -217,7 +222,8 @@ local function positionThreat(f)
     end
     if low and low<0 and high>0 then
         local delta = high<=-low and high or low
-        local point,relative,anchor,x,y = label:GetPoint(1)
+        local ok,point,relative,anchor,x,y=pcall(label.GetPoint,label,1)
+        if not ok or not point or not readable(x) or not readable(y) then return end
         label:ClearAllPoints()
         label:SetPoint(point,relative,anchor,x,y+delta)
     end
@@ -452,9 +458,9 @@ local function auraSweep(box,art)
         sweep:SetAllPoints(art)
         sweep:EnableMouse(false)
         sweep:SetHideCountdownNumbers(true)
-        sweep:SetDrawEdge(false)
+        sweep:SetDrawEdge(true)
         sweep:SetReverse(true)
-        sweep:SetSwipeColor(0,0,0,.40)
+        sweep:SetSwipeColor(.06,.06,.06,.68)
         if sweep.SetDrawBling then sweep:SetDrawBling(false) end
         box.rnpSweep=sweep
     end
@@ -467,7 +473,7 @@ local function auraFill(box,art)
         fill:SetAllPoints(art)
         fill:EnableMouse(false)
         fill:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
-        fill:SetStatusBarColor(0,0,0,.40)
+        fill:SetStatusBarColor(.06,.06,.06,.68)
         box.rnpFill=fill
     end
     return box.rnpFill
@@ -476,7 +482,10 @@ end
 local function sweepStyle(box)
     local style=A.db.auraSweepStyle or "Circle"
     local enabled=A.db.auraSweep~=false
-    if box.rnpSweep then box.rnpSweep:SetDrawSwipe(enabled and style=="Circle") end
+    if box.rnpSweep then
+        box.rnpSweep:SetDrawSwipe(enabled and style=="Circle")
+        box.rnpSweep:SetDrawEdge(enabled and style=="Circle")
+    end
     local fill=box.rnpFill
     if fill then
         fill:SetOrientation((style=="Up" or style=="Down") and "VERTICAL" or "HORIZONTAL")
