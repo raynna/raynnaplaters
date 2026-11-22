@@ -188,7 +188,7 @@ local function showThreat(f,status,percent,fallback,tint)
     local format=A.db.threatFormat
     if format=="Status" or not readable(percent) or type(percent)~="number" then
         label:SetText(fallback or threatStates[status])
-    elseif format=="Percent" then label:SetFormattedText("%d%%",math.floor(percent+.5))
+    elseif format=="Percent" or tint=="partyAggro" then label:SetFormattedText("%d%%",math.floor(percent+.5))
     else label:SetFormattedText("%s %d%%",fallback or threatStates[status],math.floor(percent+.5)) end
     label:SetTextColor(color(tint or status>=2 and "aggro" or status==1 and "pulling" or "safe"))
     label:Show()
