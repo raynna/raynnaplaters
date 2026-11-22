@@ -11,6 +11,14 @@ local parts = {
 }
 local states = setmetatable({}, {__mode="k"})
 local renderingDraft
+function A.MergeServiceDesigns(db)
+    local profiles=db.designerProfiles
+    if not profiles then return end
+    for _,kind in ipairs({"trainer","vendor","repair","flight","inn","bank","auction","stable"}) do
+        if profiles.service==nil then profiles.service=profiles[kind] end
+        profiles[kind]=nil
+    end
+end
 function A.DesignLayout(frame)
     local kind=frame and (frame.designType or (frame.isPersonal and "personal"))
     local profiles=A.db.designerProfiles
@@ -178,7 +186,7 @@ function A.BuildDesigner(row, button, label, changed)
     local toolbar=CreateFrame("Frame",nil,window)
     toolbar:SetPoint("TOPLEFT",12,-34);toolbar:SetPoint("TOPRIGHT",-12,-34);toolbar:SetHeight(30)
     local canvas=CreateFrame("Frame",nil,window)
-    canvas:SetPoint("TOPLEFT",12,-70);canvas:SetPoint("BOTTOMRIGHT",-12,34)
+    canvas:SetPoint("TOPLEFT",12,-70);canvas:SetPoint("BOTTOMRIGHT",-12,64)
     local footer=CreateFrame("Frame",nil,window)
     footer:SetPoint("BOTTOMLEFT",12,3);footer:SetSize(410,25)
     local magnet=CreateFrame("CheckButton",nil,footer,"UICheckButtonTemplate")
@@ -191,6 +199,12 @@ function A.BuildDesigner(row, button, label, changed)
     sample:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Buttons\\WHITE8X8",edgeSize=1})
     sample:SetBackdropColor(.06,.045,.03,.96)
     sample:SetBackdropBorderColor(.48,.36,.17,1)
+    local resetRow=CreateFrame("Frame",nil,window)
+    resetRow:SetPoint("BOTTOMLEFT",12,32)
+    resetRow:SetPoint("BOTTOMRIGHT",-12,32)
+    resetRow:SetHeight(26)
+    local receipt=label(resetRow,"",225)
+    receipt:SetTextColor(.45,1,.55)
     local mode=1
     local function storeLayout(layout)
         A.db.designerProfiles=A.db.designerProfiles or {}
@@ -209,8 +223,46 @@ function A.BuildDesigner(row, button, label, changed)
         local copy={}
         for k,v in pairs(A.DesignLayout(sample.sample) or {}) do if k~=parts[selected][1] then copy[k]=v end end
         storeLayout(copy)
+        receipt:SetText(parts[selected][2].." reset.")
         changed(); A.DrawAuraExample(sample);sync()
     end)
+    local confirm=CreateFrame("Frame",nil,resetRow)
+    confirm:SetAllPoints()
+    confirm:Hide()
+    local question=label(confirm,"",0)
+    local pending
+    local resetType,resetAll
+    local function dismiss()
+        pending=nil
+        confirm:Hide()
+        resetType:Show()
+        resetAll:Show()
+        receipt:Show()
+    end
+    local function ask(all)
+        pending=all and "all" or sample.designerMode.designType
+        question:SetText(all and "Reset every plate design?" or "Reset this plate design?")
+        receipt:Hide()
+        resetType:Hide()
+        resetAll:Hide()
+        confirm:Show()
+    end
+    resetType=button(resetRow,"Reset this design",0,111,function() ask(false) end)
+    resetAll=button(resetRow,"Reset all designs",114,108,function() ask(true) end)
+    button(confirm,CANCEL,180,72,dismiss)
+    button(confirm,"Reset",256,72,function()
+        if pending=="all" then
+            A.db.designerProfiles=nil
+            A.db.designer=nil
+            receipt:SetText("All designs reset.")
+        elseif pending==sample.designerMode.designType then
+            storeLayout({})
+            receipt:SetText((sample.designerMode.label or sample.designerMode.title).." reset.")
+        else dismiss();return end
+        dismiss()
+        changed()
+    end)
+    window:HookScript("OnHide",dismiss)
     openRow.sync=function() sync();magnet:SetChecked(A.db.designerSnap~=false) end
     sync()
     sample.category="Designer"
@@ -227,6 +279,8 @@ function A.BuildDesigner(row, button, label, changed)
     window:HookScript("OnHide",function() picker:Hide() end)
     for index,entry in ipairs(A.designerModes) do
         local b=button(picker,entry.label or entry.title,0,148,function()
+            dismiss()
+            receipt:SetText("")
             mode=index
             selected=1
             if entry.compact then

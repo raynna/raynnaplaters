@@ -359,6 +359,9 @@ player:SetScript("OnDragStop", function()
     local cx, cy = UIParent:GetCenter()
     A.db.x, A.db.y = x - cx / player:GetScale(), y - cy / player:GetScale()
 end)
+function A.ReportReset(message)
+    UIErrorsFrame:AddMessage(message,.45,1,.55)
+end
 function A.NewProfile()
     local profile={
         powerHeight=5, powerValue=false, powerFormat="Current / max", personalPowerFormat="Current / max",
@@ -420,6 +423,7 @@ events:SetScript("OnEvent", function(_, event)
             RaynnaNameplatesDB = A.NewProfile()
         end
         A.db = RaynnaNameplatesDB
+        A.MergeServiceDesigns(A.db)
         if A.db.personalSetupPending==nil then A.db.personalSetupPending=true end
         for key, default in pairs({guildPosition="Above left", guildStyle="Gold tag", targetGlowSpread=18, targetGlowStyle="Soft outline", targetGlowStrength=100, targetColor="FFB31E", showLevelText=true, showHealthText=true, hideFullHealthText=false, healthFormat="Current + percent", wrapNames=false, nameWrapWidth=132, plateFont="Ubuntu Bold", textScale=100, previewEnemyPlayer=false, showSurname = true, personal = false, badges = true, spec = true, scale = 100}) do
             if A.db[key] == nil then A.db[key] = default end
@@ -448,6 +452,10 @@ events:SetScript("OnEvent", function(_, event)
         A.RegisterSettings()
     end
     if not A.db then return end
+    if event=="PLAYER_ENTERING_WORLD" and A.db.showResetReceipt then
+        A.db.showResetReceipt=nil
+        A.ReportReset("Nameplates: all designs and settings reset.")
+    end
     if event=="PLAYER_ENTERING_WORLD" and A.db.personalSetupPending and not (StaticPopup_Visible and StaticPopup_Visible(personalPrompt)) then
         StaticPopup_Show(personalPrompt)
     end

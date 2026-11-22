@@ -1173,7 +1173,7 @@ local function refresh(f,u)
     if f.objectOnly then f.distance:Hide(); showThreat(f,nil) end
     if f.guild then f.guild:Hide() end
     if f.objectOnly then
-        f.designType=companion and "companion" or object and "object" or nameOnly and "idle" or f.serviceKind or (f.dialogQuest and "questGiver") or "talk"
+        f.designType=companion and "companion" or object and "object" or nameOnly and "idle" or (f.serviceTitle and "service") or (f.dialogQuest and "questGiver") or "talk"
         f:SetScale(.94*groupScale("friendlyNPCScale"))
         A.Badge(f,nil,f.name)
         f.power:Hide()
@@ -1451,14 +1451,7 @@ addMode("idle","Idle NPC","Deathguard Samsa")
 addMode("talk","Talkable NPC","Orgrimmar Grunt")
 addMode("companion","Pet / minion","Donna")
 addMode("object","World object","Portal to Undercity")
-addMode("vendor","Vendor","Xan'tish","Snake Vendor","Interface\\GossipFrame\\VendorGossipIcon")
-addMode("trainer","Trainer","Uthel'nay","Mage Trainer","Interface\\GossipFrame\\TrainerGossipIcon")
-addMode("repair","Repairs","Ott","Weaponsmith","Interface\\Minimap\\Tracking\\Repair")
-addMode("flight","Flight master","Doras","Wind Rider Master","Interface\\Minimap\\Tracking\\FlightMaster")
-addMode("inn","Innkeeper","Gryshka","Innkeeper","Interface\\Minimap\\Tracking\\Innkeeper")
-addMode("bank","Banker","Karus","Banker","Interface\\Minimap\\Tracking\\Banker")
-addMode("auction","Auctioneer","Auctioneer Wabang","Auctioneer","Interface\\Minimap\\Tracking\\Auctioneer")
-addMode("stable","Stable master","Theodore Mont Claire","Stable Master","Interface\\Minimap\\Tracking\\StableMaster")
+addMode("service","Service NPC","Uthel'nay","Mage Trainer","Interface\\GossipFrame\\TrainerGossipIcon")
 function A.PreviewMode()
     for index,mode in ipairs(A.previewModes) do
         if mode.key==A.db.previewMode then return mode,index end
