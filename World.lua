@@ -462,20 +462,37 @@ end
 
 local function pulseAura(box,remaining)
     if A.db.auraPulse==false or not remaining or remaining<=0 or remaining>3 then
-        if box.rnpPulse then box.rnpPulse:Hide() end
+        if box.rnpPulse then
+            box.rnpPulse:Hide()
+            if box.rnpBeat:IsPlaying() then box.rnpBeat:Stop() end
+        end
         return
     end
     if not box.rnpPulse then
-        local glow=box:CreateTexture(nil,"OVERLAY")
-        glow:SetAllPoints()
+        local overlay=CreateFrame("Frame",nil,box)
+        overlay:SetAllPoints()
+        overlay:EnableMouse(false)
+        overlay:SetFrameLevel(math.max(box:GetFrameLevel(),box.rnpSweep and box.rnpSweep:GetFrameLevel() or 0)+2)
+        local glow=overlay:CreateTexture(nil,"OVERLAY")
+        glow:SetPoint("TOPLEFT",-2,2)
+        glow:SetPoint("BOTTOMRIGHT",2,-2)
         glow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
         glow:SetBlendMode("ADD")
         glow:SetTexCoord(.16,.84,.16,.84)
         glow:SetVertexColor(1,.82,.35)
-        box.rnpPulse=glow
+        box.rnpPulse=overlay
+        local beat=box:CreateAnimationGroup()
+        beat:SetLooping("BOUNCE")
+        local grow=beat:CreateAnimation("Scale")
+        grow:SetScaleFrom(1,1)
+        grow:SetScaleTo(1.18,1.18)
+        grow:SetDuration(.32)
+        grow:SetSmoothing("IN_OUT")
+        box.rnpBeat=beat
     end
-    box.rnpPulse:SetAlpha(.52+.44*math.cos(remaining*math.pi*3))
+    box.rnpPulse:SetAlpha(.58+.4*math.cos(remaining*math.pi*3))
     box.rnpPulse:Show()
+    if not box.rnpBeat:IsPlaying() then box.rnpBeat:Play() end
 end
 
 local function nativePulse(sweep,elapsed)
@@ -487,7 +504,7 @@ local function nativePulse(sweep,elapsed)
     if readable(start) and readable(duration) and type(start)=="number" and type(duration)=="number" and duration>0 then
         remaining=(start+duration)/1000-GetTime()
     end
-    pulseAura(sweep,remaining)
+    pulseAura(sweep:GetParent(),remaining)
 end
 
 local function updateCountdown(box,elapsed)
@@ -625,6 +642,7 @@ local function nativeAuras(f,u,enabled)
                             local sweep=auraSweep(button,art)
                             sweep:SetDrawSwipe(A.db.auraSweep~=false)
                             button:SetDurationCooldown(sweep)
+                            sweep:HookScript("OnHide",function() pulseAura(button,nil) end)
                             if A.db.auraPulse~=false then sweep:SetScript("OnUpdate",nativePulse) end
                         end
                         local timer=text(button,10,"auraText")
@@ -662,7 +680,7 @@ local function nativeAuras(f,u,enabled)
         if sweep then
             sweep:SetDrawSwipe(A.db.auraSweep~=false)
             sweep:SetScript("OnUpdate",A.db.auraPulse~=false and nativePulse or nil)
-            if A.db.auraPulse==false then pulseAura(sweep,nil) end
+            if A.db.auraPulse==false then pulseAura(entry.icon,nil) end
         end
     end
     return supported
@@ -1321,7 +1339,7 @@ local function drawSample(f,mode,previewSelected)
     auras(f,nil,{
         {helpful=true,canApplyAura=true,spellId=1459,name="Arcane Intellect",icon=135932,duration=12,expirationTime=now+12},
         {spellId=1822,name="Rake",icon=132152,duration=8,expirationTime=now+8},
-        {spellId=122,icon=135848,duration=6,expirationTime=now+6}
+        {spellId=122,icon=135848,duration=5,expirationTime=now+5}
     })
     A.DesignPlate(f)
 end
