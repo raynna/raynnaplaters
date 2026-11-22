@@ -189,12 +189,37 @@ local function showThreat(f,status,percent,fallback,tint)
     if format=="Status" or not readable(percent) or type(percent)~="number" then
         label:SetText(fallback or threatStates[status])
     elseif format=="Percent" then label:SetFormattedText("%d%%",math.floor(percent+.5))
-    else label:SetFormattedText("%s %d%%",threatStates[status],math.floor(percent+.5)) end
+    else label:SetFormattedText("%s %d%%",fallback or threatStates[status],math.floor(percent+.5)) end
     label:SetTextColor(color(tint or status>=2 and "aggro" or status==1 and "pulling" or "safe"))
     label:Show()
 end
+local function mobThreatToken(u)
+    for _, alias in ipairs({"target", "mouseover", "focus", "pettarget"}) do
+        if UnitIsUnit(alias, u) then return alias end
+    end
+    for i = 1, GetNumSubgroupMembers() do
+        local alias = "party"..i.."target"
+        if UnitIsUnit(alias, u) then return alias end
+        alias = "partypet"..i.."target"
+        if UnitIsUnit(alias, u) then return alias end
+    end
+    return u
+end
+
+local function holdsThreat(member, mob)
+    if not UnitExists(member) then return false end
+    if UnitIsUnit(mob.."target", member) then return true end
+    if UnitDetailedThreatSituation then
+        local tanking, rank = UnitDetailedThreatSituation(member, mob)
+        if readable(tanking) and tanking then return true end
+        if readable(rank) and rank and rank >= 2 then return true end
+    end
+    local rank = UnitThreatSituation(member, mob)
+    return readable(rank) and rank and rank >= 2
+end
+
 local function combatThreat(f,u)
-    local token=UnitIsUnit(u,"target") and "target" or u
+    local token=mobThreatToken(u)
     local status,percent,tanking
     if UnitDetailedThreatSituation then
         tanking,status,percent=UnitDetailedThreatSituation("player",token)
@@ -213,10 +238,11 @@ local function combatThreat(f,u)
         key="safe"
         for i=1,GetNumSubgroupMembers() do
             local member="party"..i
-            local rank=UnitThreatSituation(member,token)
-            if (readable(rank) and rank and rank>=2) or UnitIsUnit(victim,member) then
-                key="partyAggro"
-                if not status then label="Party aggro" end
+            if holdsThreat(member,token) then
+                key,label="partyAggro","Party aggro"
+                break
+            elseif holdsThreat("partypet"..i,token) then
+                key,label="partyAggro","Party pet aggro"
                 break
             end
         end
