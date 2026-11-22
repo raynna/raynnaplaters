@@ -460,8 +460,46 @@ local function auraSweep(box,art)
     return box.rnpSweep
 end
 
-local function pulseAura(box,remaining)
-    if A.db.auraPulse==false or not remaining or remaining<=0 or remaining>3 then
+local function auraFill(box,art)
+    if not box.rnpFill then
+        local fill=CreateFrame("StatusBar",nil,box)
+        fill:SetAllPoints(art)
+        fill:EnableMouse(false)
+        fill:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+        fill:SetStatusBarColor(.30,.30,.30,.82)
+        box.rnpFill=fill
+    end
+    return box.rnpFill
+end
+
+local function sweepStyle(box)
+    local style=A.db.auraSweepStyle or "Circle"
+    local enabled=A.db.auraSweep~=false
+    if box.rnpSweep then box.rnpSweep:SetDrawSwipe(enabled and style=="Circle") end
+    local fill=box.rnpFill
+    if fill then
+        fill:SetOrientation((style=="Up" or style=="Down") and "VERTICAL" or "HORIZONTAL")
+        fill:SetReverseFill(style=="Left" or style=="Down")
+        fill:SetAlpha(enabled and style~="Circle" and 1 or 0)
+    end
+end
+
+local expiryCurve
+local function durationPulse(box,duration)
+    if not duration or not duration.EvaluateRemainingDuration or not C_CurveUtil then return false end
+    if not expiryCurve then
+        expiryCurve=C_CurveUtil.CreateCurve()
+        expiryCurve:AddPoint(0,0)
+        expiryCurve:AddPoint(.001,1)
+        expiryCurve:AddPoint(3,1)
+        expiryCurve:AddPoint(3.001,0)
+    end
+    box.rnpPulse:SetAlpha(duration:EvaluateRemainingDuration(expiryCurve))
+    return true
+end
+
+local function pulseAura(box,remaining,duration)
+    if A.db.auraPulse==false or (not duration and (not remaining or remaining<=0 or remaining>3)) then
         if box.rnpPulse then
             box.rnpPulse:Hide()
             if box.rnpBeat:IsPlaying() then box.rnpBeat:Stop() end
@@ -472,8 +510,14 @@ local function pulseAura(box,remaining)
         local overlay=CreateFrame("Frame",nil,box)
         overlay:SetAllPoints()
         overlay:EnableMouse(false)
-        overlay:SetFrameLevel(math.max(box:GetFrameLevel(),box.rnpSweep and box.rnpSweep:GetFrameLevel() or 0)+2)
-        local glow=overlay:CreateTexture(nil,"OVERLAY")
+        overlay:SetFrameLevel(box:GetFrameLevel()+8)
+        local flash=CreateFrame("Frame",nil,overlay)
+        flash:SetAllPoints()
+        flash:EnableMouse(false)
+        local wash=flash:CreateTexture(nil,"ARTWORK")
+        wash:SetAllPoints()
+        wash:SetColorTexture(1,.75,.24,.32)
+        local glow=flash:CreateTexture(nil,"OVERLAY")
         glow:SetPoint("TOPLEFT",-2,2)
         glow:SetPoint("BOTTOMRIGHT",2,-2)
         glow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
@@ -481,24 +525,57 @@ local function pulseAura(box,remaining)
         glow:SetTexCoord(.16,.84,.16,.84)
         glow:SetVertexColor(1,.82,.35)
         box.rnpPulse=overlay
-        local beat=box:CreateAnimationGroup()
+        local beat=flash:CreateAnimationGroup()
         beat:SetLooping("BOUNCE")
         local grow=beat:CreateAnimation("Scale")
         grow:SetScaleFrom(1,1)
-        grow:SetScaleTo(1.18,1.18)
+        grow:SetScaleTo(1.25,1.25)
         grow:SetDuration(.32)
         grow:SetSmoothing("IN_OUT")
+        local brighten=beat:CreateAnimation("Alpha")
+        brighten:SetFromAlpha(.18);brighten:SetToAlpha(1)
+        brighten:SetDuration(.32);brighten:SetSmoothing("IN_OUT")
         box.rnpBeat=beat
     end
-    box.rnpPulse:SetAlpha(.58+.4*math.cos(remaining*math.pi*3))
+    if not durationPulse(box,duration) then box.rnpPulse:SetAlpha(remaining and 1 or 0) end
     box.rnpPulse:Show()
     if not box.rnpBeat:IsPlaying() then box.rnpBeat:Play() end
+end
+
+local timeFormatter
+local function auraTimeFormatter()
+    if timeFormatter then return timeFormatter end
+    local formatter=C_StringUtil.CreateNumericRuleFormatter()
+    formatter:SetBreakpoints({
+        {threshold=0,format=""},
+        {threshold=.000001,step=1,format="%d"},
+        {threshold=60,step=1,format="%dm",components={{div=60}}},
+        {threshold=3600,step=1,format="%dh",components={{div=3600}}},
+    })
+    timeFormatter=formatter
+    return formatter
+end
+
+local function objectCountdown(box,elapsed)
+    box.tick=(box.tick or 0)+elapsed
+    if box.tick<.1 then return end
+    box.tick=0
+    local object=box.rnpDurationObject
+    box.timer:SetText(object:FormatRemainingDuration(auraTimeFormatter(),Enum.DurationTimeModifier.RealTime))
+    pulseAura(box,nil,object)
 end
 
 local function nativePulse(sweep,elapsed)
     sweep.rnpTick=(sweep.rnpTick or 0)+elapsed
     if sweep.rnpTick<.1 then return end
     sweep.rnpTick=0
+    local box=sweep:GetParent()
+    local fill=box.rnpFill
+    local object=fill and fill.GetTimerDuration and fill:GetTimerDuration()
+    if readable(object) and object and object.EvaluateRemainingDuration and C_CurveUtil then
+        pulseAura(box,nil,object)
+        return
+    end
     local start,duration=sweep:GetCooldownTimes()
     local remaining
     if readable(start) and readable(duration) and type(start)=="number" and type(duration)=="number" and duration>0 then
@@ -513,6 +590,9 @@ local function updateCountdown(box,elapsed)
     box.tick=0
     local remaining=box.expires-GetTime()
     pulseAura(box,remaining)
+    if box.rnpFill and A.db.auraSweep~=false and (A.db.auraSweepStyle or "Circle")~="Circle" then
+        box.rnpFill:SetValue(box.rnpDuration-remaining)
+    end
     local seconds=math.ceil(remaining)
     if seconds<=0 then box.timer:Hide(); box:SetScript("OnUpdate",nil); return end
     box.timer:SetText(seconds>=86400 and math.ceil(seconds/86400).."d" or seconds>=3600 and math.ceil(seconds/3600).."h" or seconds>=60 and math.ceil(seconds/60).."m" or seconds)
@@ -622,9 +702,7 @@ local function nativeAuras(f,u,enabled)
             container:SetFlowLayoutAnchorPoint("TOPLEFT")
             container:SetFlowLayoutGrowthDirection(AnchorUtil.FlowDirection.Right,AnchorUtil.FlowDirection.Down)
             container:SetFlowLayoutMaximumLineSize(126*#filters)
-            local formatter=C_StringUtil.CreateNumericRuleFormatter()
-            formatter:AddBreakpoint({threshold=0,step=1,format="%d"})
-            formatter:AddBreakpoint({threshold=60,step=60,format=""})
+            local formatter=auraTimeFormatter()
             for index,filter in ipairs(filters) do
                 local helpful=filter:sub(1,7)=="HELPFUL"
                 container:AddAuraGroup("group"..index,filter,{
@@ -638,14 +716,22 @@ local function nativeAuras(f,u,enabled)
                         art:SetPoint("BOTTOMRIGHT",-2,2)
                         art:SetTexCoord(.07,.93,.07,.93)
                         button:SetIcon(art)
+                        if button.SetDurationBar then
+                            local fill=auraFill(button,art)
+                            button:SetDurationBar(fill,{direction=Enum.StatusBarTimerDirection.ElapsedTime})
+                        end
                         if button.SetDurationCooldown then
                             local sweep=auraSweep(button,art)
-                            sweep:SetDrawSwipe(A.db.auraSweep~=false)
+                            sweepStyle(button)
                             button:SetDurationCooldown(sweep)
                             sweep:HookScript("OnHide",function() pulseAura(button,nil) end)
                             if A.db.auraPulse~=false then sweep:SetScript("OnUpdate",nativePulse) end
                         end
-                        local timer=text(button,10,"auraText")
+                        local caption=CreateFrame("Frame",nil,button)
+                        caption:SetAllPoints()
+                        caption:SetFrameLevel(button:GetFrameLevel()+10)
+                        caption:EnableMouse(false)
+                        local timer=text(caption,12,"auraText")
                         timer:SetPoint("TOP",button,"BOTTOM",0,-1)
                         timer:SetWidth(0)
                         timer:SetWordWrap(false)
@@ -678,7 +764,7 @@ local function nativeAuras(f,u,enabled)
     for _,entry in ipairs(f.nativeThreatIcons or {}) do
         local sweep=entry.icon.rnpSweep
         if sweep then
-            sweep:SetDrawSwipe(A.db.auraSweep~=false)
+            sweepStyle(entry.icon)
             sweep:SetScript("OnUpdate",A.db.auraPulse~=false and nativePulse or nil)
             if A.db.auraPulse==false then pulseAura(entry.icon,nil) end
         end
@@ -775,17 +861,46 @@ local function auras(f,u,samples)
                 box.expires=a.expirationTime
                 if A.db.auraSweep~=false then
                     local sweep=auraSweep(box,box.art)
+                    if (A.db.auraSweepStyle or "Circle")~="Circle" then
+                        local fill=auraFill(box,box.art)
+                        box.rnpDuration=a.duration
+                        fill:SetMinMaxValues(0,a.duration)
+                        fill:Show()
+                    end
+                    sweepStyle(box)
                     sweep:SetCooldown(a.expirationTime-a.duration,a.duration)
                     sweep:Show()
-                elseif box.rnpSweep then box.rnpSweep:Hide() end
+                else
+                    if box.rnpSweep then box.rnpSweep:Hide() end
+                    if box.rnpFill then box.rnpFill:Hide() end
+                end
                 box.tick=1
                 box:SetScript("OnUpdate",updateCountdown)
                 box.timer:Show()
                 updateCountdown(box,0)
+            elseif C_UnitAuras and C_UnitAuras.GetAuraDuration and readable(a.auraInstanceID) and a.auraInstanceID then
+                local object=C_UnitAuras.GetAuraDuration(u,a.auraInstanceID)
+                if readable(object) and object and object.FormatRemainingDuration then
+                    box.rnpDurationObject=object
+                    box.tick=1
+                    box.timer:Show()
+                    local sweep=auraSweep(box,box.art)
+                    local fill=auraFill(box,box.art)
+                    if sweep.SetCooldownFromDurationObject then sweep:SetCooldownFromDurationObject(object);sweep:Show() end
+                    if fill.SetTimerDuration then fill:SetTimerDuration(object,Enum.StatusBarInterpolation.Immediate,Enum.StatusBarTimerDirection.ElapsedTime);fill:Show() end
+                    sweepStyle(box)
+                    box:SetScript("OnUpdate",objectCountdown)
+                    objectCountdown(box,0)
+                else
+                    box:SetScript("OnUpdate",nil);box.timer:Hide();pulseAura(box,nil)
+                    if box.rnpFill then box.rnpFill:Hide() end
+                    if box.rnpSweep then box.rnpSweep:Hide() end
+                end
             else
                 box.timer:Hide()
                 box:SetScript("OnUpdate",nil)
                 pulseAura(box,nil)
+                if box.rnpFill then box.rnpFill:Hide() end
                 if box.rnpSweep then box.rnpSweep:Hide() end
             end
             box:Show()
@@ -1383,7 +1498,10 @@ function A.DrawAuraExample(parent)
     end
     A.DesignPlate(parent.sample)
     local scale=parent.sample:GetScale()*UIParent:GetEffectiveScale()/parent:GetEffectiveScale()
-    parent.sample:SetScale(scale)
+    if parent.PositionCamera then
+        parent.designBaseScale=scale
+        parent:PositionCamera()
+    else parent.sample:SetScale(scale) end
 end
 local function refreshPreview()
     if not A.db.preview then
@@ -1526,7 +1644,7 @@ function A.InitWorld()
         local key=group[1]
         if A.db[key]==nil then A.db[key]=key=="targetScale" and 120 or 80 end
     end
-    for k,v in pairs({showThreat=true,threatPosition="Right of bar",questTint=true,questIcon=true,quest="FFBE32",townPlates=true,hideIdleNPCs=true,compactCompanions=true,showCompanionText=true,compactFriendly=true,previewTarget=true,targetOutline=true,auraSweep=true,auraPulse=true,auraScale=100,power=true,buffs=true,casts=true,castTimer=true,castHeight=14,debuffs=true,hideName=false,hostile="CC0613",neutral="FFEB2B",friendly="70FF90",aggro="CC0613",pulling="FFEB2B",partyAggro="56A8FF",safe="C7CFD9",castColor="903BCC"}) do
+    for k,v in pairs({showThreat=true,threatPosition="Right of bar",questTint=true,questIcon=true,quest="FFBE32",townPlates=true,hideIdleNPCs=true,compactCompanions=true,showCompanionText=true,compactFriendly=true,previewTarget=true,targetOutline=true,auraSweep=true,auraSweepStyle="Circle",auraPulse=true,auraScale=100,power=true,buffs=true,casts=true,castTimer=true,castHeight=14,debuffs=true,hideName=false,hostile="CC0613",neutral="FFEB2B",friendly="70FF90",aggro="CC0613",pulling="FFEB2B",partyAggro="56A8FF",safe="C7CFD9",castColor="903BCC"}) do
         if A.db[k]==nil then A.db[k]=v end
     end
     for _,e in ipairs({"UNIT_TARGET","GROUP_ROSTER_UPDATE","PLAYER_GUILD_UPDATE","GOSSIP_SHOW","QUEST_DETAIL","QUEST_PROGRESS","QUEST_COMPLETE","QUEST_LOG_UPDATE","UNIT_POWER_UPDATE","UNIT_MAXPOWER","UNIT_DISPLAYPOWER","NAME_PLATE_UNIT_ADDED","NAME_PLATE_UNIT_REMOVED","PLAYER_TARGET_CHANGED","UNIT_HEALTH","UNIT_MAXHEALTH","UNIT_NAME_UPDATE","UNIT_FACTION","UNIT_FLAGS","UNIT_AURA","UNIT_THREAT_LIST_UPDATE","UNIT_THREAT_SITUATION_UPDATE","UNIT_SPELLCAST_START","UNIT_SPELLCAST_STOP","UNIT_SPELLCAST_FAILED","UNIT_SPELLCAST_INTERRUPTED","UNIT_SPELLCAST_DELAYED","UNIT_SPELLCAST_CHANNEL_START","UNIT_SPELLCAST_CHANNEL_UPDATE","UNIT_SPELLCAST_CHANNEL_STOP","PLAYER_REGEN_ENABLED","PLAYER_REGEN_DISABLED"}) do events:RegisterEvent(e) end

@@ -110,8 +110,8 @@ function A.DesignThreat(frame)
 end
 
 function A.BuildDesigner(row, button, label, changed)
-    local hint=row("Designer","Left-drag to move. Right-drag sideways to resize.","position scale layout")
-    label(hint,"Left-drag to move. Right-drag sideways to resize.",3)
+    local hint=row("Designer","Drag parts to move. Right-drag to resize. Scroll to zoom; drag empty space to pan.","position scale layout")
+    label(hint,"Drag parts to move. Right-drag to resize. Scroll to zoom; drag empty space to pan.",3)
     local openRow=row("Designer","Open layout designer","drag move resize elements")
     local window=CreateFrame("Frame",nil,UIParent,"BackdropTemplate")
     window:SetFrameStrata("FULLSCREEN_DIALOG")
@@ -295,10 +295,50 @@ function A.BuildDesigner(row, button, label, changed)
             end
         end
     end
-    local drag
+    local drag,pan
+    sample.cameraZoom=1
+    sample.cameraX,sample.cameraY=0,0
+    function sample:PositionCamera()
+        local plate=self.sample
+        if not plate or not self.designBaseScale then return end
+        local scale=self.designBaseScale*self.cameraZoom
+        plate:SetScale(scale)
+        plate:ClearAllPoints()
+        plate:SetPoint("CENTER",self,"CENTER",self.cameraX/scale,self.cameraY/scale)
+    end
+    local cameraText=label(footer,"100%",205)
+    button(footer,"Centre view",259,103,function()
+        sample.cameraX,sample.cameraY,sample.cameraZoom=0,0,1
+        cameraText:SetText("100%")
+        sample:PositionCamera()
+    end)
+    surface:EnableMouseWheel(true)
+    surface:SetScript("OnMouseWheel",function(_,delta)
+        if drag or pan then return end
+        local old=sample.cameraZoom
+        local zoom=math.max(.4,math.min(4,old*1.2^delta))
+        local mx,my=GetCursorPosition()
+        local cx,cy=sample:GetCenter()
+        local k=sample:GetEffectiveScale()
+        mx,my=mx/k-cx,my/k-cy
+        sample.cameraX=mx+(sample.cameraX-mx)*zoom/old
+        sample.cameraY=my+(sample.cameraY-my)*zoom/old
+        sample.cameraZoom=zoom
+        cameraText:SetText(("%d%%"):format(math.floor(zoom*100+.5)))
+        sample:PositionCamera()
+    end)
     surface:SetScript("OnMouseDown",function(_,mouse)
         if mouse~="LeftButton" and mouse~="RightButton" then return end
-        selected=hitPart(sample.sample) or selected
+        if drag or pan then return end
+        local hit=hitPart(sample.sample)
+        if not hit then
+            if mouse=="LeftButton" then
+                local x,y=GetCursorPosition()
+                pan={cx=x,cy=y,x=sample.cameraX,y=sample.cameraY}
+            end
+            return
+        end
+        selected=hit
         local key=parts[selected][1]
         local x,y,s=A.DesignerAura(key)
         local cx,cy=GetCursorPosition()
@@ -343,6 +383,15 @@ function A.BuildDesigner(row, button, label, changed)
         if sample:IsVisible() then A.DrawAuraExample(sample);sync() end
     end
     surface:SetScript("OnUpdate",function()
+        if pan then
+            if not IsMouseButtonDown("LeftButton") then pan=nil;return end
+            local x,y=GetCursorPosition()
+            local k=sample:GetEffectiveScale()
+            sample.cameraX=pan.x+(x-pan.cx)/k
+            sample.cameraY=pan.y+(y-pan.cy)/k
+            sample:PositionCamera()
+            return
+        end
         if not drag then return end
         if not IsMouseButtonDown(drag.mouse) then finish(true);return end
         local cx,cy=GetCursorPosition()
@@ -378,8 +427,8 @@ function A.BuildDesigner(row, button, label, changed)
         end
         readout:SetText(("%+.0f, %+.0f   %d%%"):format(x,y,math.floor(s*100+.5)))
     end)
-    surface:SetScript("OnMouseUp",function() finish(true) end)
-    surface:SetScript("OnHide",function() finish(false) end)
+    surface:SetScript("OnMouseUp",function() pan=nil;finish(true) end)
+    surface:SetScript("OnHide",function() pan=nil;finish(false) end)
     sample:SetScript("OnShow",function() A.DrawAuraExample(sample);sync() end)
     A.DrawAuraExample(sample)
     return function() if sample:IsVisible() then A.DrawAuraExample(sample) end end
