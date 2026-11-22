@@ -284,7 +284,7 @@ local function combatThreat(f,u)
             key,label = "partyAggro","Party aggro"
         end
     end
-    showThreat(f,status,percent,label or (not status and "Threat unknown"),key)
+    showThreat(f,status,percent,label,key)
     return key
 end
 local function paint(f,u)
