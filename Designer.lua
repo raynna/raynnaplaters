@@ -19,11 +19,18 @@ end
 
 -- Remember the unedited anchors. Existing layouts can re-anchor a region when
 -- casts, guilds or resources appear, including while a custom layout is active.
-local function transform(region,key)
+local function transform(region,key,owners)
     if not region then return end
     local opt=options(key)
     local state=states[region]
-    if not opt and not state then return end
+    local compensate
+    if owners then
+        for i=1,region:GetNumPoints() do
+            local _,anchor=region:GetPoint(i)
+            if anchor and owners[anchor] and options(owners[anchor]) then compensate=true; break end
+        end
+    end
+    if not opt and not state and not compensate then return end
     state=state or {}
     states[region]=state
     local dx,dy,scale=A.DesignerAura(key)
@@ -61,6 +68,12 @@ local function transform(region,key)
     local w,h=region:GetParent():GetSize()
     for _,p in ipairs(points) do
         local x,y=dx,dy
+        local parentKey=owners and owners[p.parent]
+        local moved=parentKey and options(parentKey)
+        if moved then
+            local units=p.parent:GetParent():GetEffectiveScale()/region:GetParent():GetEffectiveScale()
+            x,y=x-moved.x*units,y-moved.y*units
+        end
         if stretch then
             x=x+(p.point:find("LEFT") and -1 or p.point:find("RIGHT") and 1 or 0)*w*(scale-1)/2
             y=y+(p.point:find("BOTTOM") and -1 or p.point:find("TOP") and 1 or 0)*h*(scale-1)/2
@@ -76,23 +89,71 @@ local function transform(region,key)
         local p=state[point]
         p.parent,p.anchor,p.outX,p.outY=parent,anchor,x,y
     end
-    if not opt then states[region]=nil end
+    if not opt and not compensate then states[region]=nil end
 end
 function A.DesignPlate(frame)
     if not A.db or (not A.db.designer and not frame.wasDesigned) then return end
-    for _,part in ipairs(parts) do transform(frame[part[1]],part[1]) end
+    local owners=frame.designerOwners or {}
+    frame.designerOwners=owners
+    for _,part in ipairs(parts) do
+        local region=frame[part[1]]
+        if region then owners[region]=part[1] end
+    end
+    for _,part in ipairs(parts) do transform(frame[part[1]],part[1],owners) end
+    transform(frame.auraAnchor,"auraAnchor",owners)
     frame.wasDesigned=A.db.designer~=nil
 end
 function A.DesignThreat(frame)
-    transform(frame.threat,"threat")
+    transform(frame.threat,"threat",frame.designerOwners)
 end
 
 function A.BuildDesigner(row, button, label, changed)
     local hint=row("Designer","Left-drag to move. Right-drag sideways to resize.","position scale layout")
     label(hint,"Left-drag to move. Right-drag sideways to resize.",3)
-    local toolbar=row("Designer","Choose element and reset position","reset size layout")
-    local canvas=row("Designer","Plate layout","drag move resize elements")
-    canvas:SetHeight(252)
+    local openRow=row("Designer","Open layout designer","drag move resize elements")
+    local window=CreateFrame("Frame",nil,UIParent,"BackdropTemplate")
+    window:SetFrameStrata("FULLSCREEN_DIALOG")
+    window:SetClampedToScreen(true)
+    window:SetPoint("CENTER")
+    local maxW,maxH=UIParent:GetWidth(),UIParent:GetHeight()
+    window:SetSize(math.min(820,maxW),math.min(530,maxH))
+    window:SetResizable(true)
+    if window.SetResizeBounds then window:SetResizeBounds(math.min(460,maxW),math.min(290,maxH),maxW,maxH)
+    elseif window.SetMinResize then window:SetMinResize(math.min(460,maxW),math.min(290,maxH)) end
+    window:SetMovable(true)
+    window:EnableMouse(true)
+    window:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Buttons\\WHITE8X8",edgeSize=1})
+    window:SetBackdropColor(.075,.05,.033,.98)
+    window:SetBackdropBorderColor(.64,.46,.22,1)
+    window:Hide()
+    local title=CreateFrame("Frame",nil,window)
+    title:SetPoint("TOPLEFT",8,-4); title:SetPoint("TOPRIGHT",-36,-4);title:SetHeight(28)
+    label(title,"Raynna's Nameplate Designer",4)
+    title:EnableMouse(true);title:RegisterForDrag("LeftButton")
+    title:SetScript("OnDragStart",function() window:StartMoving() end)
+    title:SetScript("OnDragStop",function() window:StopMovingOrSizing() end)
+    local close=CreateFrame("Button",nil,window,"UIPanelCloseButton")
+    close:SetPoint("TOPRIGHT",-2,-2)
+    close:SetScript("OnClick",function() window:Hide() end)
+    local grip=CreateFrame("Button",nil,window)
+    grip:SetSize(20,20);grip:SetPoint("BOTTOMRIGHT",-2,2)
+    grip:SetNormalTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    grip:SetScript("OnMouseDown",function(_,mouse) if mouse=="LeftButton" then window:StartSizing("BOTTOMRIGHT") end end)
+    grip:SetScript("OnMouseUp",function() window:StopMovingOrSizing() end)
+    window:SetScript("OnHide",function() window:StopMovingOrSizing() end)
+    local function open() window:Show();window:Raise() end
+    A.OpenDesigner=open
+    button(openRow,"Open designer",0,140,open)
+    local toolbar=CreateFrame("Frame",nil,window)
+    toolbar:SetPoint("TOPLEFT",12,-34);toolbar:SetPoint("TOPRIGHT",-12,-34);toolbar:SetHeight(30)
+    local canvas=CreateFrame("Frame",nil,window)
+    canvas:SetPoint("TOPLEFT",12,-70);canvas:SetPoint("BOTTOMRIGHT",-12,34)
+    local footer=CreateFrame("Frame",nil,window)
+    footer:SetPoint("BOTTOMLEFT",12,3);footer:SetSize(410,25)
+    local magnet=CreateFrame("CheckButton",nil,footer,"UICheckButtonTemplate")
+    magnet:SetPoint("LEFT");magnet.Text:SetText("Snap edges and centres")
+    magnet:SetScript("OnShow",function(self) self:SetChecked(A.db.designerSnap~=false) end)
+    magnet:SetScript("OnClick",function(self) A.db.designerSnap=not not self:GetChecked() end)
     local sample=CreateFrame("Frame",nil,canvas,"BackdropTemplate")
     sample:SetAllPoints()
     sample:SetClipsChildren(true)
@@ -112,7 +173,7 @@ function A.BuildDesigner(row, button, label, changed)
         if A.db.designer then A.db.designer[parts[selected][1]]=nil end
         changed(); A.DrawAuraExample(sample);sync()
     end)
-    toolbar.sync=sync
+    openRow.sync=function() sync();magnet:SetChecked(A.db.designerSnap~=false) end
     sync()
     sample.category="Designer"
     local surface=CreateFrame("Frame",nil,sample)
@@ -139,6 +200,41 @@ function A.BuildDesigner(row, button, label, changed)
         end
         return best
     end
+    -- Store screen-space bounds at mouse-down so the snap targets never chase
+    -- the moving part. Each axis releases when it leaves the magnetic radius.
+    local function bounds(region)
+        if not region or not region:IsVisible() then return end
+        local x,y,w,h=region:GetRect()
+        if not x or not y or not w or not h then return end
+        local k=region:GetEffectiveScale()
+        return {x*k,y*k,(x+w)*k,(y+h)*k}
+    end
+    local function snapAxis(first,last,near,far,delta,radius)
+        local best
+        for _,a in ipairs({first,last,(first+last)/2}) do
+            for _,b in ipairs({near,far,(near+far)/2}) do
+                local d=b-a-delta
+                if math.abs(d)<=radius and (not best or math.abs(d)<math.abs(best)) then best=d end
+            end
+        end
+        return best
+    end
+    local function snap(d,dx,dy)
+        local r=d.rect
+        if not r or A.db.designerSnap==false then return dx,dy end
+        local bestX,bestY
+        for _,t in ipairs(d.targets) do
+            local gx=math.max(0,t[1]-r[3]-dx,r[1]+dx-t[3])
+            local gy=math.max(0,t[2]-r[4]-dy,r[2]+dy-t[4])
+            if gx<=16 and gy<=16 then
+                local x=snapAxis(r[1],r[3],t[1],t[3],dx,5)
+                local y=snapAxis(r[2],r[4],t[2],t[4],dy,5)
+                if x and (not bestX or math.abs(x)<math.abs(bestX)) then bestX=x end
+                if y and (not bestY or math.abs(y)<math.abs(bestY)) then bestY=y end
+            end
+        end
+        return dx+(bestX or 0),dy+(bestY or 0)
+    end
     local drag
     surface:SetScript("OnMouseDown",function(_,mouse)
         if mouse~="LeftButton" and mouse~="RightButton" then return end
@@ -160,6 +256,19 @@ function A.BuildDesigner(row, button, label, changed)
                 end
             end
         end
+        drag.targets={}
+        drag.rect=bounds(region)
+        local function addBounds(r,k)
+            local b=bounds(r)
+            if not b then return end
+            if k~=key then table.insert(drag.targets,b)
+            elseif not region then
+                local v=drag.rect
+                drag.rect=v and {math.min(v[1],b[1]),math.min(v[2],b[2]),math.max(v[3],b[3]),math.max(v[4],b[4])} or b
+            end
+        end
+        for _,part in ipairs(parts) do addBounds(sample.sample[part[1]],part[1]) end
+        for _,icon in ipairs(sample.sample.icons or {}) do addBounds(icon,icon.designKey) end
         sample.designerDragging=true
         sync()
     end)
@@ -168,7 +277,9 @@ function A.BuildDesigner(row, button, label, changed)
         if not IsMouseButtonDown(drag.mouse) then drag=nil;sample.designerDragging=nil;changed();A.DrawAuraExample(sample);return end
         local cx,cy=GetCursorPosition()
         local factor=drag.units
-        local dx,dy=(cx-drag.cx)/factor,(cy-drag.cy)/factor
+        local dx,dy=cx-drag.cx,cy-drag.cy
+        if drag.mouse=="LeftButton" then dx,dy=snap(drag,dx,dy) end
+        dx,dy=dx/factor,dy/factor
         local function round(n) return math.floor(n+.5) end
         local x,y,s=drag.x,drag.y,drag.scale
         if not drag.lastScale and math.abs(dx)+math.abs(dy)<2 then return end
@@ -179,7 +290,7 @@ function A.BuildDesigner(row, button, label, changed)
         A.db.designer=A.db.designer or {}
         A.db.designer[drag.key]={x=x,y=y,scale=s}
         if drag.region then
-            transform(drag.region,drag.key)
+            A.DesignPlate(sample.sample)
         else
             local first=drag.icons[1]
             for _,saved in ipairs(drag.icons) do

@@ -145,6 +145,7 @@ function A.RegisterSettings()
             local name=group
             tabs[name]=button(nav,name,0,73,function()
                 current=name;search:SetText("");search:ClearFocus();layout()
+                if name=="Designer" and A.OpenDesigner then A.OpenDesigner() end
             end)
             tabs[name]:ClearAllPoints()
             tabs[name]:SetPoint("TOPLEFT",((i-1)%5)*78,-math.floor((i-1)/5)*26)
@@ -224,7 +225,7 @@ function A.RegisterSettings()
         reset:ClearAllPoints()
         reset:SetPoint("BOTTOMRIGHT",page,"BOTTOMRIGHT",-8,6)
         StaticPopupDialogs.RAYNNA_NAMEPLATES_RESET_ALL={
-            text="Reset all RaynnaÃƒÂ¢Ã¢â€šÂ¬Ã¢â€žÂ¢s Nameplates settings and designer positions for this character?",
+            text="Reset all RaynnaÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â‚¬Å¾Ã‚Â¢s Nameplates settings and designer positions for this character?",
             button1="Reset all",button2=CANCEL,timeout=0,whileDead=true,hideOnEscape=true,
             OnAccept=function()
                 local defaults=A.NewProfile()
