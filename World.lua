@@ -309,10 +309,14 @@ local function paint(f,u)
         local _, class = UnitClass(u)
         local c = readable(class) and RAID_CLASS_COLORS[class]
         if c then showThreat(f,nil); f.health:SetStatusBarColor(c.r,c.g,c.b) return end
-    elseif key ~= "friendly" and UnitAffectingCombat(u) then
-        key=combatThreat(f,u)
+    elseif key ~= "friendly" and (UnitAffectingCombat(u) or GetNumSubgroupMembers() > 0) then
+        local threatKey = combatThreat(f,u)
+        if threatKey ~= "safe" or UnitAffectingCombat(u) then
+            f.health:SetStatusBarColor(color(threatKey))
+            return
+        end
     end
-    if UnitIsPlayer(u) or key=="friendly" or not UnitAffectingCombat(u) then showThreat(f,nil) end
+    showThreat(f,nil)
     if f.quest and A.db.questTint and not UnitAffectingCombat(u) then key="quest" end
     f.health:SetStatusBarColor(color(key))
 end
@@ -1297,8 +1301,11 @@ function A.InitWorld()
     end
     if not A.distanceTicker then
         C_Timer.NewTicker(.5,function()
+            local grouped = GetNumSubgroupMembers() > 0
             for token,frame in pairs(active) do
-                if not frame.objectOnly and not UnitIsPlayer(token) and UnitAffectingCombat(token) then paint(frame,token) end
+                if not frame.objectOnly and not UnitIsPlayer(token) and (grouped or UnitAffectingCombat(token)) then
+                    paint(frame,token)
+                end
             end
         end)
         A.distanceTicker=C_Timer.NewTicker(.2,function()
