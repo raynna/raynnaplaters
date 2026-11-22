@@ -14,6 +14,7 @@ local plateFonts = {
     ["Game font"] = STANDARD_TEXT_FONT,
     ["Damage font"] = DAMAGE_TEXT_FONT,
 }
+A.plateFonts=plateFonts
 local fontSizes = setmetatable({}, {__mode = "k"})
 A.TextRoles = {
     {"nameText","Character name"}, {"guildText","Guild name"}, {"levelText","Level"},

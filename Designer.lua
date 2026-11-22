@@ -50,9 +50,34 @@ local function readAnchor(region,index)
         return point,parent,anchor,x,y
     end
 end
+local function applyAppearance(region,opt)
+    local target=region.caption or region
+    if target.GetFont then
+        local face,size,flags=target:GetFont()
+        local wanted=opt and A.plateFonts[opt.font]
+        if wanted or target.rnpCustomFace then
+            local path=wanted or target.rnpFont
+            if path and path~=face then target:SetFont(path,size,flags) end
+            target.rnpCustomFace=wanted
+        end
+    end
+    local tint=opt and opt.tint
+    if not tint and not target.rnpOriginalTint then return end
+    local get=target.GetTextColor or target.GetStatusBarColor or target.GetVertexColor
+    local set=target.SetTextColor or target.SetStatusBarColor or target.SetVertexColor
+    if not get or not set then return end
+    if tint then
+        if not target.rnpOriginalTint then target.rnpOriginalTint={get(target)} end
+        set(target,tonumber(tint:sub(1,2),16)/255,tonumber(tint:sub(3,4),16)/255,tonumber(tint:sub(5,6),16)/255)
+    else
+        set(target,unpack(target.rnpOriginalTint))
+        target.rnpOriginalTint=nil
+    end
+end
 local function transform(region,key,owners,frame)
     if not region or (not region.rnpAnchor and not region.rnpStretch and region.IsAnchoringRestricted and region:IsAnchoringRestricted()) then return end
     local opt=options(key,frame)
+    applyAppearance(region,opt)
     local state=states[region]
     local compensate
     if owners then
@@ -186,7 +211,12 @@ function A.BuildDesigner(row, button, label, changed)
     local toolbar=CreateFrame("Frame",nil,window)
     toolbar:SetPoint("TOPLEFT",12,-34);toolbar:SetPoint("TOPRIGHT",-12,-34);toolbar:SetHeight(30)
     local canvas=CreateFrame("Frame",nil,window)
-    canvas:SetPoint("TOPLEFT",12,-70);canvas:SetPoint("BOTTOMRIGHT",-12,64)
+    canvas:SetPoint("TOPLEFT",12,-70);canvas:SetPoint("BOTTOMRIGHT",-12,95)
+    local guide=window:CreateFontString(nil,"ARTWORK","GameFontHighlightSmall")
+    guide:SetPoint("TOPLEFT",canvas,"BOTTOMLEFT",0,-2)
+    guide:SetPoint("TOPRIGHT",canvas,"BOTTOMRIGHT",0,-2)
+    guide:SetJustifyH("LEFT")
+    guide:SetText("Click a part: settings   |   Left-drag: move   |   Right-drag: resize\nScroll: zoom   |   Drag empty space: pan")
     local footer=CreateFrame("Frame",nil,window)
     footer:SetPoint("BOTTOMLEFT",12,3);footer:SetSize(410,25)
     local magnet=CreateFrame("CheckButton",nil,footer,"UICheckButtonTemplate")
@@ -210,6 +240,7 @@ function A.BuildDesigner(row, button, label, changed)
         A.db.designerProfiles=A.db.designerProfiles or {}
         A.db.designerProfiles[A.designerModes[mode].designType]=layout
     end
+    local inspector
     local selected=1
     local selectButton,readout
     local function sync()
@@ -217,9 +248,10 @@ function A.BuildDesigner(row, button, label, changed)
         local x,y,s=A.DesignerAura(parts[selected][1],sample.sample)
         readout:SetText(("%+d, %+d   %d%%"):format(x,y,math.floor(s*100+.5)))
     end
-    selectButton=button(toolbar,"",0,138,function() selected=selected%#parts+1;sync() end)
+    selectButton=button(toolbar,"",0,138,function() if inspector then inspector:Hide() end;selected=selected%#parts+1;sync() end)
     readout=label(toolbar,"",145)
     button(toolbar,"Reset part",307,96,function()
+        if inspector then inspector:Hide() end
         local copy={}
         for k,v in pairs(A.DesignLayout(sample.sample) or {}) do if k~=parts[selected][1] then copy[k]=v end end
         storeLayout(copy)
@@ -240,6 +272,7 @@ function A.BuildDesigner(row, button, label, changed)
         receipt:Show()
     end
     local function ask(all)
+        if inspector then inspector:Hide() end
         pending=all and "all" or sample.designerMode.designType
         question:SetText(all and "Reset every plate design?" or "Reset this plate design?")
         receipt:Hide()
@@ -279,6 +312,7 @@ function A.BuildDesigner(row, button, label, changed)
     window:HookScript("OnHide",function() picker:Hide() end)
     for index,entry in ipairs(A.designerModes) do
         local b=button(picker,entry.label or entry.title,0,148,function()
+            if inspector then inspector:Hide() end
             dismiss()
             receipt:SetText("")
             mode=index
@@ -300,6 +334,85 @@ function A.BuildDesigner(row, button, label, changed)
     surface:SetAllPoints()
     surface:SetFrameLevel(sample:GetFrameLevel()+40)
     surface:EnableMouse(true)
+    inspector=CreateFrame("Frame",nil,canvas,"BackdropTemplate")
+    inspector:SetPoint("TOPRIGHT",-4,-4)
+    inspector:SetSize(218,148)
+    inspector:SetFrameLevel(surface:GetFrameLevel()+12)
+    inspector:EnableMouse(true)
+    inspector:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Buttons\\WHITE8X8",edgeSize=1})
+    inspector:SetBackdropColor(.09,.065,.04,.98)
+    inspector:SetBackdropBorderColor(.62,.45,.20,1)
+    inspector:Hide()
+    window:HookScript("OnHide",function() inspector:Hide() end)
+    local function propertyRow(y)
+        local row=CreateFrame("Frame",nil,inspector)
+        row:SetPoint("TOPLEFT",7,-y)
+        row:SetSize(204,24)
+        return row
+    end
+    local header=propertyRow(4)
+    local heading=label(header,"",0)
+    button(header,"X",178,25,function() inspector:Hide() end)
+    local sizeRow,fontRow,tintRow=propertyRow(36),propertyRow(70),propertyRow(104)
+    label(sizeRow,"Size",0)
+    local sizeText=label(sizeRow,"",109)
+    local fontButton,tintField
+    local fontNames={}
+    for name in pairs(A.plateFonts) do table.insert(fontNames,name) end
+    table.sort(fontNames)
+    local function syncProperties()
+        local key=parts[selected][1]
+        local opt=(A.DesignLayout(sample.sample) or {})[key] or {}
+        heading:SetText(parts[selected][2])
+        sizeText:SetText(("%d%%"):format(math.floor((opt.scale or 1)*100+.5)))
+        local region=sample.sample[key]
+        local target=region and (region.caption or region)
+        fontRow:SetShown(target and target.GetFont~=nil or false)
+        fontButton:SetText(opt.font or "Use plate font")
+        tintRow:SetShown(target and (target.SetTextColor or target.SetStatusBarColor or target.SetVertexColor) and true or false)
+        tintField:SetText(opt.tint or "")
+    end
+    local function property(field,value)
+        local layout={}
+        for k,v in pairs(A.DesignLayout(sample.sample) or {}) do layout[k]=v end
+        local key=parts[selected][1]
+        local part={x=0,y=0,scale=1}
+        for k,v in pairs(layout[key] or {}) do part[k]=v end
+        part[field]=value
+        layout[key]=part
+        storeLayout(layout)
+        changed()
+        syncProperties()
+    end
+    local function resize(step)
+        local _,_,scale=A.DesignerAura(parts[selected][1],sample.sample)
+        property("scale",math.max(.25,math.min(3,scale+step)))
+    end
+    button(sizeRow,"-",75,29,function() resize(-.05) end)
+    button(sizeRow,"+",162,29,function() resize(.05) end)
+    label(fontRow,"Font",0)
+    fontButton=button(fontRow,"",48,150,function()
+        local opt=(A.DesignLayout(sample.sample) or {})[parts[selected][1]] or {}
+        local nextFont=fontNames[1]
+        for i,name in ipairs(fontNames) do if name==opt.font then nextFont=fontNames[i+1];break end end
+        property("font",nextFont)
+    end)
+    label(tintRow,"Colour #",0)
+    tintField=CreateFrame("EditBox",nil,tintRow,"InputBoxTemplate")
+    tintField:SetPoint("LEFT",65,0)
+    tintField:SetSize(66,20)
+    tintField:SetMaxLetters(6)
+    tintField:SetAutoFocus(false)
+    local function applyTint()
+        local hex=tintField:GetText()
+        if hex=="" then property("tint",nil)
+        elseif hex:match("^%x%x%x%x%x%x$") then property("tint",hex:upper())
+        else syncProperties() end
+        tintField:ClearFocus()
+    end
+    tintField:SetScript("OnEnterPressed",applyTint)
+    tintField:SetScript("OnEscapePressed",function(self) self:ClearFocus();syncProperties() end)
+    button(tintRow,"Apply",140,57,applyTint)
     local function hitPart(f)
         local best,area
         local cx,cy=GetCursorPosition()
@@ -373,7 +486,7 @@ function A.BuildDesigner(row, button, label, changed)
         local function offset(key,x,y)
             local base=d.base[key] or {x=0,y=0,scale=1}
             local units=d.unitsByKey[key]
-            draft[key]={x=base.x+x/units,y=base.y+y/units,scale=base.scale}
+            draft[key]={x=base.x+x/units,y=base.y+y/units,scale=base.scale,font=base.font,tint=base.tint}
         end
         for _,key in ipairs(moving.members) do
             if key~=d.key then offset(key,dx,dy) end
@@ -447,6 +560,7 @@ function A.BuildDesigner(row, button, label, changed)
     surface:SetScript("OnMouseDown",function(_,mouse)
         if mouse~="LeftButton" and mouse~="RightButton" then return end
         if drag or pan then return end
+        inspector:Hide()
         local hit=hitPart(sample.sample)
         if not hit then
             if mouse=="LeftButton" then
@@ -494,8 +608,10 @@ function A.BuildDesigner(row, button, label, changed)
     local function finish(commit)
         if not drag then return end
         local draft=drag.draft
+        local clicked=commit and not draft and drag.mouse=="LeftButton"
         drag=nil
         sample.designerDragging=nil
+        if clicked then syncProperties();inspector:Show() end
         if commit and draft then storeLayout(draft);changed() end
         if sample:IsVisible() then A.DrawAuraExample(sample);sync() end
     end
@@ -525,7 +641,8 @@ function A.BuildDesigner(row, button, label, changed)
         drag.lastX,drag.lastY,drag.lastScale=x,y,s
         local draft={}
         for k,v in pairs(drag.base) do draft[k]=v end
-        draft[drag.key]={x=x,y=y,scale=s}
+        local original=drag.base[drag.key] or {}
+        draft[drag.key]={x=x,y=y,scale=s,font=original.font,tint=original.tint}
         if drag.mouse=="LeftButton" then moveNeighbours(drag,draft,(x-drag.x)*factor,(y-drag.y)*factor) end
         drag.draft=draft
         renderingDraft=draft

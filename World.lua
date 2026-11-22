@@ -475,6 +475,8 @@ local function auraFill(box,art)
         fill:EnableMouse(false)
         fill:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
         fill:SetStatusBarColor(.06,.06,.06,.68)
+        fill.edge=fill:CreateTexture(nil,"OVERLAY")
+        fill.edge:SetColorTexture(1,.77,.22,.96)
         box.rnpFill=fill
     end
     return box.rnpFill
@@ -491,6 +493,21 @@ local function sweepStyle(box)
     if fill then
         fill:SetOrientation((style=="Up" or style=="Down") and "VERTICAL" or "HORIZONTAL")
         fill:SetReverseFill(style=="Left" or style=="Down")
+        local edge=fill.edge
+        local texture=fill:GetStatusBarTexture()
+        edge:ClearAllPoints()
+        if style=="Up" or style=="Down" then
+            local side=style=="Up" and "TOP" or "BOTTOM"
+            edge:SetPoint(side.."LEFT",texture,side.."LEFT")
+            edge:SetPoint(side.."RIGHT",texture,side.."RIGHT")
+            edge:SetHeight(1.5)
+        else
+            local side=style=="Left" and "LEFT" or "RIGHT"
+            edge:SetPoint("TOP"..side,texture,"TOP"..side)
+            edge:SetPoint("BOTTOM"..side,texture,"BOTTOM"..side)
+            edge:SetWidth(1.5)
+        end
+        edge:SetShown(enabled and style~="Circle")
         fill:SetAlpha(enabled and style~="Circle" and 1 or 0)
     end
 end
