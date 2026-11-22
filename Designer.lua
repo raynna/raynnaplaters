@@ -22,6 +22,13 @@ end
 -- Remember the unedited anchors. Existing layouts can re-anchor a region when
 -- casts, guilds or resources appear, including while a custom layout is active.
 local function readAnchor(region,index)
+    if region.rnpAnchor then
+        local a=region.rnpAnchor
+        return a.point,a.parent,a.anchor,a.x,a.y
+    elseif region.rnpStretch then
+        local point=index==1 and "TOPLEFT" or "BOTTOMRIGHT"
+        return point,region:GetParent(),point,0,0
+    end
     if region.IsAnchoringRestricted and region:IsAnchoringRestricted() then return end
     local ok,point,parent,anchor,x,y=pcall(region.GetPoint,region,index)
     if ok and point and not (issecretvalue and (issecretvalue(x) or issecretvalue(y))) then
@@ -29,12 +36,12 @@ local function readAnchor(region,index)
     end
 end
 local function transform(region,key,owners)
-    if not region or (region.IsAnchoringRestricted and region:IsAnchoringRestricted()) then return end
+    if not region or (not region.rnpAnchor and not region.rnpStretch and region.IsAnchoringRestricted and region:IsAnchoringRestricted()) then return end
     local opt=options(key)
     local state=states[region]
     local compensate
     if owners then
-        for i=1,region:GetNumPoints() do
+        for i=1,(region.rnpAnchor and 1 or region.rnpStretch and 2 or region:GetNumPoints()) do
             local point,anchor=readAnchor(region,i)
             if not point then return end
             if anchor and owners[anchor] and options(owners[anchor]) then compensate=true; break end
@@ -44,14 +51,14 @@ local function transform(region,key,owners)
     state=state or {}
     states[region]=state
     local dx,dy,scale=A.DesignerAura(key)
-    local count=region:GetNumPoints()
+    local count=region.rnpAnchor and 1 or region.rnpStretch and 2 or region:GetNumPoints()
     if count==0 then return end
     local points={}
     for i=1,count do
         local point,parent,anchor,x,y=readAnchor(region,i)
         if not point then return end
         local old=state[point]
-        if old and old.parent==parent and old.anchor==anchor and x==old.outX and y==old.outY then
+        if not region.rnpAnchor and not region.rnpStretch and old and old.parent==parent and old.anchor==anchor and x==old.outX and y==old.outY then
             x,y=old.x,old.y
         end
         points[i]={point=point,parent=parent,anchor=anchor,x=x,y=y}
@@ -94,6 +101,10 @@ local function transform(region,key,owners)
         -- WoW stores anchors at client precision. Cache the values it actually
         -- returns so a redraw cannot mistake rounding for a fresh layout.
         state[p.point]=p
+    end
+    if region.rnpAnchor or region.rnpStretch then
+        if not opt and not compensate then states[region]=nil end
+        return
     end
     for i=1,region:GetNumPoints() do
         local point,parent,anchor,x,y=readAnchor(region,i)
@@ -441,5 +452,5 @@ function A.BuildDesigner(row, button, label, changed)
     surface:SetScript("OnHide",function() pan=nil;finish(false) end)
     sample:SetScript("OnShow",function() A.DrawAuraExample(sample);sync() end)
     A.DrawAuraExample(sample)
-    return function() if sample:IsVisible() then A.DrawAuraExample(sample) end end
+    return function() if sample:IsVisible() and not sample.designerDragging then A.DrawAuraExample(sample);sync() end end
 end

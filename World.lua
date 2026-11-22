@@ -21,19 +21,19 @@ local function bar(parent, height)
 end
 function A.AddIndicators(f)
     f.power = bar(f,5)
-    f.power:SetPoint("TOPLEFT",f,"BOTTOMLEFT",0,-2)
+    A.AnchorPart(f.power,"TOPLEFT",f,"BOTTOMLEFT",0,-2)
     f.power:Hide()
     f.auraAnchor = CreateFrame("Frame",nil,f)
     f.auraAnchor:SetSize(1,1)
     f.cast = bar(f,14)
     f.cast:Hide()
-    f.cast:SetPoint("TOPLEFT",f,"BOTTOMLEFT",0,-2)
+    A.AnchorPart(f.cast,"TOPLEFT",f,"BOTTOMLEFT",0,-2)
     f.castText, f.castTime = text(f.cast,11,"castText"), text(f.cast,11,"castText")
-    f.castText:SetPoint("LEFT",3,0)
+    A.AnchorPart(f.castText,"LEFT",3,0)
     f.castText:SetWidth(126)
     f.castText:SetWordWrap(false)
     f.castText:SetJustifyH("LEFT")
-    f.castTime:SetPoint("RIGHT",-2,0)
+    A.AnchorPart(f.castTime,"RIGHT",-2,0)
     f.cast:SetScript("OnUpdate",function(c)
         local now = GetTime()
         if f:GetParent().designerDragging then return end
@@ -44,9 +44,9 @@ function A.AddIndicators(f)
     local function layout()
         local last = f.power:IsShown() and f.power or f
         f.cast:ClearAllPoints()
-        f.cast:SetPoint("TOPLEFT",last,"BOTTOMLEFT",0,-2)
+        A.AnchorPart(f.cast,"TOPLEFT",last,"BOTTOMLEFT",0,-2)
         f.auraAnchor:ClearAllPoints()
-        f.auraAnchor:SetPoint("TOPLEFT",f.cast:IsShown() and f.cast or last,"BOTTOMLEFT",0,-3)
+        A.AnchorPart(f.auraAnchor,"TOPLEFT",f.cast:IsShown() and f.cast or last,"BOTTOMLEFT",0,-3)
         A.DesignPlate(f)
     end
     f.power:SetScript("OnShow",layout)
@@ -73,7 +73,7 @@ local function power(f,unit,enemy,personal,sample)
     if A.db[key.."Value"] then
         if not f.powerValue then
             f.powerValue=text(f.power,10,"resourceText")
-            f.powerValue:SetPoint("CENTER")
+            A.AnchorPart(f.powerValue,"CENTER")
             f.powerValue:SetWordWrap(false)
         end
         A.SetNumericLabel(f.powerValue,current,maximum,A.db[key.."Format"],unit,kind)
@@ -154,17 +154,18 @@ local function create(plate)
     f:SetSize(162,18)
     f.health = bar(f,18)
     f.health:SetAllPoints()
+    f.health.rnpStretch=true
     f.name, f.level, f.value = text(f,15,"nameText"), text(f,14,"levelText"), text(f.health,13,"healthText")
     f.name:SetWidth(132)
     f.name:SetWordWrap(false)
     f.name:SetJustifyH("LEFT")
-    f.name:SetPoint("BOTTOMLEFT", f,"TOPLEFT",0,2)
-    f.level:SetPoint("BOTTOMRIGHT",f,"TOPRIGHT",0,2)
+    A.AnchorPart(f.name,"BOTTOMLEFT", f,"TOPLEFT",0,2)
+    A.AnchorPart(f.level,"BOTTOMRIGHT",f,"TOPRIGHT",0,2)
     f.distance=text(f,11,"distanceText")
-    f.distance:SetPoint("LEFT",f.level,"RIGHT",4,0)
+    A.AnchorPart(f.distance,"LEFT",f.level,"RIGHT",4,0)
     f.distance:SetTextColor(.8,.88,.95)
     f.distance:Hide()
-    f.value:SetPoint("CENTER")
+    A.AnchorPart(f.value,"CENTER")
     A.AddIndicators(f)
     return f
 end
@@ -181,9 +182,9 @@ local function positionThreat(f)
     if not label or not label:IsShown() then return end
     local position=A.db.threatPosition
     label:ClearAllPoints()
-    if position=="Left of bar" then label:SetPoint("RIGHT",f.health,"LEFT",-5,0)
-    elseif position=="Above name" then label:SetPoint("BOTTOM",f.name,"TOP",0,2)
-    else label:SetPoint("LEFT",f.health,"RIGHT",5,0) end
+    if position=="Left of bar" then A.AnchorPart(label,"RIGHT",f.health,"LEFT",-5,0)
+    elseif position=="Above name" then A.AnchorPart(label,"BOTTOM",f.name,"TOP",0,2)
+    else A.AnchorPart(label,"LEFT",f.health,"RIGHT",5,0) end
     if label.IsAnchoringRestricted and label:IsAnchoringRestricted() then return end
     local ok,left,bottom,width,height=pcall(label.GetRect,label)
     if not ok then return end
@@ -225,7 +226,7 @@ local function positionThreat(f)
         local ok,point,relative,anchor,x,y=pcall(label.GetPoint,label,1)
         if not ok or not point or not readable(x) or not readable(y) then return end
         label:ClearAllPoints()
-        label:SetPoint(point,relative,anchor,x,y+delta)
+        A.AnchorPart(label,point,relative,anchor,x,y+delta)
     end
 end
 local function showThreat(f,percent,tint)
@@ -572,21 +573,63 @@ local function objectCountdown(box,elapsed)
     pulseAura(box,nil,object)
 end
 
-local function bindExpiryRing(button,caption)
-    if A.db.auraPulse==false or not button.AddPandemicRegion or not button.AddPandemicActiveAnimation then return end
-    local ring=caption:CreateTexture(nil,"OVERLAY")
+-- The ordinary duration label works for timed slows and roots as well as
+-- refreshable effects. Drive its warning from the same native clock.
+local warningFormatter
+local function liveAuraFormatter()
+    if A.db.auraPulse==false then return auraTimeFormatter() end
+    if warningFormatter then return warningFormatter end
+    local rules={{threshold=0,format=""}}
+    for i=0,11 do
+        local seconds=math.ceil((i+1)/4)
+        local digits=tostring(seconds)
+        local bright=i%2==0
+        rules[#rules+1]={threshold=i==0 and .000001 or i/4,
+            format=bright and ("|cffffbd38>"..digits.."<|r") or digits}
+    end
+    rules[#rules+1]={threshold=3.001,step=1,format="%d"}
+    rules[#rules+1]={threshold=60,step=1,format="%dm",components={{div=60}}}
+    rules[#rules+1]={threshold=3600,step=1,format="%dh",components={{div=3600}}}
+    warningFormatter=C_StringUtil.CreateNumericRuleFormatter()
+    warningFormatter:SetBreakpoints(rules)
+    return warningFormatter
+end
+
+local function bindExpiryRing(button,caption,receiver)
+    if A.db.auraPulse==false or not receiver or not receiver.GetTimerDuration then return end
+    local gate=CreateFrame("Frame",nil,caption)
+    gate:SetAllPoints(button)
+    gate:EnableMouse(false)
+    gate:SetAlpha(0)
+    local ring=gate:CreateTexture(nil,"OVERLAY")
     ring:SetPoint("TOPLEFT",button,"TOPLEFT",-3,3)
     ring:SetPoint("BOTTOMRIGHT",button,"BOTTOMRIGHT",3,-3)
     ring:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
     ring:SetTexCoord(.16,.84,.16,.84)
     ring:SetVertexColor(1,.78,.15)
-    ring:Hide()
     local beat=ring:CreateAnimationGroup()
     beat:SetLooping("BOUNCE")
     local alpha=beat:CreateAnimation("Alpha")
-    alpha:SetFromAlpha(.18);alpha:SetToAlpha(1);alpha:SetDuration(.32)
-    button:AddPandemicRegion(ring)
-    button:AddPandemicActiveAnimation(beat)
+    alpha:SetFromAlpha(.12);alpha:SetToAlpha(1);alpha:SetDuration(.25)
+    beat:Play()
+    local function updateGate()
+        local object=receiver:GetTimerDuration()
+        if readable(object) and object and object.EvaluateRemainingDuration and C_CurveUtil then
+            if not expiryCurve then
+                expiryCurve=C_CurveUtil.CreateCurve()
+                expiryCurve:AddPoint(0,0);expiryCurve:AddPoint(.001,1)
+                expiryCurve:AddPoint(3,1);expiryCurve:AddPoint(3.001,0)
+            end
+            gate:SetAlpha(object:EvaluateRemainingDuration(expiryCurve))
+        else gate:SetAlpha(0) end
+    end
+    local elapsed=0
+    gate:SetScript("OnUpdate",function(_,dt)
+        elapsed=elapsed+dt
+        if elapsed<.1 then return end
+        elapsed=0
+        if not pcall(updateGate) then gate:SetScript("OnUpdate",nil) end
+    end)
 end
 
 local function updateCountdown(box,elapsed)
@@ -707,7 +750,7 @@ local function nativeAuras(f,u,enabled)
             container:SetFlowLayoutAnchorPoint("TOPLEFT")
             container:SetFlowLayoutGrowthDirection(AnchorUtil.FlowDirection.Right,AnchorUtil.FlowDirection.Down)
             container:SetFlowLayoutMaximumLineSize(126*#filters)
-            local formatter=auraTimeFormatter()
+            local formatter=liveAuraFormatter()
             for index,filter in ipairs(filters) do
                 local helpful=filter:sub(1,7)=="HELPFUL"
                 container:AddAuraGroup("group"..index,filter,{
@@ -736,15 +779,16 @@ local function nativeAuras(f,u,enabled)
                         timer:Show()
                         f.nativeThreatIcons = f.nativeThreatIcons or {}
                         table.insert(f.nativeThreatIcons,{icon=button,timer=timer})
-                        bindExpiryRing(button,caption)
-                        if A.db.auraSweep~=false then
-                            if (A.db.auraSweepStyle or "Circle")=="Circle" and button.SetDurationCooldown then
-                                button:SetDurationCooldown(auraSweep(button,art))
-                            elseif button.SetDurationBar then
-                                local fill=auraFill(button,art)
-                                button:SetDurationBar(fill,{direction=Enum.StatusBarTimerDirection.ElapsedTime})
-                                sweepStyle(button)
-                            end
+                        local linear=A.db.auraSweep~=false and (A.db.auraSweepStyle or "Circle")~="Circle"
+                        local receiver
+                        if button.SetDurationBar and (linear or A.db.auraPulse~=false) then
+                            receiver=auraFill(button,art)
+                            button:SetDurationBar(receiver,{direction=Enum.StatusBarTimerDirection.ElapsedTime})
+                            sweepStyle(button)
+                        end
+                        bindExpiryRing(button,caption,receiver)
+                        if A.db.auraSweep~=false and not linear and button.SetDurationCooldown then
+                            button:SetDurationCooldown(auraSweep(button,art))
                         end
                     end,
                     maxFrameCount=6,
@@ -994,7 +1038,7 @@ local function nameMarker(f)
         if not f.questBadge then
             f.questBadge=f:CreateTexture(nil,"OVERLAY")
             f.questBadge:SetSize(17,17)
-            f.questBadge:SetPoint("RIGHT",f.name,"LEFT",-3,0)
+            A.AnchorPart(f.questBadge,"RIGHT",f.name,"LEFT",-3,0)
         end
         f.questBadge:SetTexture(texture)
         f.questBadge:SetDesaturated(f.dialogQuest=="incomplete" or f.dialogQuest=="upcoming")
@@ -1480,6 +1524,7 @@ function A.DrawAuraExample(parent)
         mode={key="enemyNPCScale",name="Quest objective",reaction="hostile",npc=true,objective=true}
     elseif category=="NPCs" and A.db.previewFriendlyNPC then mode=A.previewModes[2] end
     if category=="Designer" then mode=A.previewModes[3] end
+    parent.sample.designerSample=category=="Designer"
     drawSample(parent.sample,mode,category=="Targeting")
     if category=="Designer" then
         local f=parent.sample
@@ -1490,7 +1535,7 @@ function A.DrawAuraExample(parent)
         f.power:Show()
         if not f.powerValue then
             f.powerValue=text(f.power,10,"resourceText")
-            f.powerValue:SetPoint("CENTER")
+            A.AnchorPart(f.powerValue,"CENTER")
         end
         f.power:SetHeight(math.max(12,f.power:GetHeight()))
         f.powerValue:SetText("75%"); f.powerValue:Show()

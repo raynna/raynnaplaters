@@ -74,6 +74,17 @@ function A.PlayerDisplayName(unit)
     local first,last=UnitName(unit)
     return A.FormatPlayerName(first,last,A.IsEnemyPlayer(unit))
 end
+-- Keep the anchors we assign. Forever can prohibit reading them back from live plates.
+function A.AnchorPart(region,point,parent,relative,x,y)
+    if type(parent)=="number" then x,y,parent,relative=parent,relative,nil,nil end
+    parent=parent or region:GetParent()
+    relative=relative or point
+    x,y=x or 0,y or 0
+    local a=region.rnpAnchor or {}
+    region.rnpAnchor=a
+    a.point,a.parent,a.anchor,a.x,a.y=point,parent,relative,x,y
+    region:SetPoint(point,parent,relative,x,y)
+end
 function A.LayoutName(owner,nameText,levelText,isPlayer)
     local wrap=A.db.wrapNames==true
     nameText:ClearAllPoints()
@@ -102,20 +113,20 @@ function A.LayoutName(owner,nameText,levelText,isPlayer)
             nameText:SetHeight(math.min(available,math.ceil(measured)+2))
         end
         if width>owner:GetWidth()-30 then
-            nameText:SetPoint("BOTTOMRIGHT",levelText,"BOTTOMLEFT",-5,0)
+            A.AnchorPart(nameText,"BOTTOMRIGHT",levelText,"BOTTOMLEFT",-5,0)
             return
         end
     elseif isPlayer then
         nameText:SetWidth(0)
         local width=nameText:GetStringWidth()
         if not (issecretvalue and issecretvalue(width)) and width>132 then
-            nameText:SetPoint("BOTTOMRIGHT",levelText,"BOTTOMLEFT",-5,0)
+            A.AnchorPart(nameText,"BOTTOMRIGHT",levelText,"BOTTOMLEFT",-5,0)
             return
         end
     else
         nameText:SetWidth(132)
     end
-    nameText:SetPoint("BOTTOMLEFT",owner,"TOPLEFT",0,2)
+    A.AnchorPart(nameText,"BOTTOMLEFT",owner,"TOPLEFT",0,2)
 end
 local personalOptions={
     name="personalName", health="personalHealth", badges="personalBadge", showLevelText="personalLevel",
@@ -137,7 +148,7 @@ function A.PlayerHeading(owner,nameText,levelText,unit,sampleGuild,enemy)
     A.LayoutName(owner,nameText,levelText,true)
     local guild
     if enemy==nil then enemy=A.IsEnemyPlayer(unit) end
-    if A.PlateOption(owner,"showGuild",enemy) then
+    if owner.designerSample or A.PlateOption(owner,"showGuild",enemy) then
         guild=sampleGuild or (unit and GetGuildInfo and GetGuildInfo(unit))
         if issecretvalue and issecretvalue(guild) then guild=nil end
     end
@@ -173,31 +184,31 @@ function A.PlayerHeading(owner,nameText,levelText,unit,sampleGuild,enemy)
         tag:ClearAllPoints()
         tag.position=position
         if owner.isPersonal and not A.db.personalName and position~="Below plate" then
-            tag:SetPoint("BOTTOMLEFT",owner,"TOPLEFT",0,2)
+            A.AnchorPart(tag,"BOTTOMLEFT",owner,"TOPLEFT",0,2)
         elseif position=="Before name" then
-            tag:SetPoint("RIGHT",nameText,"LEFT",-4,0)
+            A.AnchorPart(tag,"RIGHT",nameText,"LEFT",-4,0)
         elseif position=="After name" then
             -- Reserve room beside the level for the guild, even with a long surname.
             nameText:ClearAllPoints()
-            nameText:SetPoint("BOTTOMRIGHT",levelText,"BOTTOMLEFT",-tag:GetWidth()-9,0)
-            tag:SetPoint("LEFT",nameText,"RIGHT",4,0)
+            A.AnchorPart(nameText,"BOTTOMRIGHT",levelText,"BOTTOMLEFT",-tag:GetWidth()-9,0)
+            A.AnchorPart(tag,"LEFT",nameText,"RIGHT",4,0)
         elseif position=="Under name" then
-            tag:SetPoint("BOTTOMLEFT",owner,"TOPLEFT",0,2)
+            A.AnchorPart(tag,"BOTTOMLEFT",owner,"TOPLEFT",0,2)
             nameText:ClearAllPoints()
-            nameText:SetPoint("BOTTOMLEFT",tag,"TOPLEFT",0,2)
+            A.AnchorPart(nameText,"BOTTOMLEFT",tag,"TOPLEFT",0,2)
         elseif position=="Below plate" then
             if not owner.auraAnchor then A.AddIndicators(owner) end
-            tag:SetPoint("TOPLEFT",owner.auraAnchor,"TOPLEFT",0,0)
+            A.AnchorPart(tag,"TOPLEFT",owner.auraAnchor,"TOPLEFT",0,0)
         elseif position=="Above centre" or position=="Above right" then
             local height=nameText:GetHeight()
             if issecretvalue and issecretvalue(height) then height=16 end
             if position=="Above centre" then
-                tag:SetPoint("BOTTOM",owner,"TOP",0,height+4)
+                A.AnchorPart(tag,"BOTTOM",owner,"TOP",0,height+4)
             else
-                tag:SetPoint("BOTTOMRIGHT",owner,"TOPRIGHT",0,height+4)
+                A.AnchorPart(tag,"BOTTOMRIGHT",owner,"TOPRIGHT",0,height+4)
             end
         else
-            tag:SetPoint("BOTTOMLEFT",nameText,"TOPLEFT",0,2)
+            A.AnchorPart(tag,"BOTTOMLEFT",nameText,"TOPLEFT",0,2)
         end
         tag:Show()
     elseif owner.guild then owner.guild:Hide() end
@@ -215,15 +226,15 @@ health:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
 local name, level, value = label(player,15,"nameText"), label(player,14,"levelText"), label(health,13,"healthText")
 player.health,player.healthBackground,player.level=health,background,level
 player.name,player.value=name,value
-name:SetPoint("BOTTOMLEFT", player, "TOPLEFT", 0, 2)
-level:SetPoint("BOTTOMRIGHT", player, "TOPRIGHT", 0, 2)
-value:SetPoint("CENTER")
+A.AnchorPart(name,"BOTTOMLEFT", player, "TOPLEFT", 0, 2)
+A.AnchorPart(level,"BOTTOMRIGHT", player, "TOPRIGHT", 0, 2)
+A.AnchorPart(value,"CENTER")
 local badges = {}
 local function badge(owner, unit, anchor, enemy)
     local icon = badges[owner]
     if icon then icon:Hide() end
     if enemy==nil then enemy=A.IsEnemyPlayer(unit) end
-    if not A.db or not A.PlateOption(owner,"badges",enemy) or not unit or not UnitIsPlayer(unit) then return end
+    if not A.db or (not owner.designerSample and not A.PlateOption(owner,"badges",enemy)) or not unit or not UnitIsPlayer(unit) then return end
     local _, class = UnitClass(unit)
     if issecretvalue and issecretvalue(class) then return end
     local readableClass = class and class:lower()
@@ -251,7 +262,7 @@ local function badge(owner, unit, anchor, enemy)
     if owner.isPersonal and not A.db.personalName then anchor=owner end
     local badgeAnchor=guild and guild:IsShown() and guild.position=="Before name" and guild or anchor or owner
     icon:ClearAllPoints()
-    icon:SetPoint("RIGHT",badgeAnchor,"LEFT",-4,0)
+    A.AnchorPart(icon,"RIGHT",badgeAnchor,"LEFT",-4,0)
     local size=A.db[A.PlayerOptionKey("iconSize",enemy)] or 18
     icon:SetSize(size,size)
     if specIcon then

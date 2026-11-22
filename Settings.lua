@@ -158,6 +158,7 @@ function A.RegisterSettings()
             rows[#rows+1]=r
             return r
         end
+        local refreshDesigner
         local function changed()
             A.RefreshFonts()
             A.launcher:SetShown(A.db.minimap)
@@ -165,6 +166,7 @@ function A.RegisterSettings()
             if A.RefreshPlateDistances then A.RefreshPlateDistances() end
             if current=="Targeting" then positionPreview() end
             if A.RefreshAuraExample then A.RefreshAuraExample() end
+            if refreshDesigner then refreshDesigner() end
         end
         local function addReset(r,key)
             button(r,"Reset",358,47,function()
@@ -218,7 +220,7 @@ function A.RegisterSettings()
             field:SetScript("OnEnterPressed",function() apply(tonumber((field:GetText():match("^%s*(%-?%d+)%s*%%?%s*$") or field:GetText():match("^%s*(%d+)%s*px%s*$")))) end)
             field:SetScript("OnEscapePressed",function() field:ClearFocus();r.sync() end)
         end
-        local refreshDesigner=A.BuildDesigner(row,button,label,changed)
+        refreshDesigner=A.BuildDesigner(row,button,label,changed)
         local confirm=CreateFrame("Frame",nil,page)
         confirm:SetPoint("BOTTOMRIGHT",-8,6)
         confirm:SetSize(330,25)
@@ -237,7 +239,7 @@ function A.RegisterSettings()
         end)
         reset:ClearAllPoints()
         reset:SetPoint("BOTTOMRIGHT",page,"BOTTOMRIGHT",-8,6)
-        label(confirm,"Reset this character's settings?",0)
+        label(confirm,"Reset design and settings? UI will reload.",0)
         button(confirm,CANCEL,175,72,dismissReset)
         button(confirm,"Reset all",250,80,function()
             dismissReset()
@@ -250,7 +252,7 @@ function A.RegisterSettings()
             A.PositionLauncher()
             A.ApplyNativeDistance(A.db.viewDistance)
             A.previewColor=nil
-            A.SyncOptions(); changed(); layout(); refreshDesigner()
+            ReloadUI()
         end)
         page:HookScript("OnHide",function()
             dismissReset()
