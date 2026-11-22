@@ -526,6 +526,35 @@ local function durationPulse(box,duration)
     return true
 end
 
+local function createExpiryPulse(box,parent)
+    local overlay=CreateFrame("Frame",nil,parent or box)
+    overlay:SetAllPoints(box)
+    overlay:EnableMouse(false)
+    overlay:SetFrameLevel(box:GetFrameLevel()+8)
+    local flash=CreateFrame("Frame",nil,overlay)
+    flash:SetAllPoints()
+    flash:EnableMouse(false)
+    local glow=flash:CreateTexture(nil,"OVERLAY")
+    glow:SetPoint("TOPLEFT",-2,2)
+    glow:SetPoint("BOTTOMRIGHT",2,-2)
+    glow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+    glow:SetBlendMode("ADD")
+    glow:SetTexCoord(.16,.84,.16,.84)
+    glow:SetVertexColor(1,.82,.35)
+    box.rnpPulse=overlay
+    local beat=flash:CreateAnimationGroup()
+    beat:SetLooping("BOUNCE")
+    local grow=beat:CreateAnimation("Scale")
+    grow:SetScaleFrom(1,1)
+    grow:SetScaleTo(1.25,1.25)
+    grow:SetDuration(.32)
+    grow:SetSmoothing("IN_OUT")
+    local brighten=beat:CreateAnimation("Alpha")
+    brighten:SetFromAlpha(.18);brighten:SetToAlpha(1)
+    brighten:SetDuration(.32);brighten:SetSmoothing("IN_OUT")
+    box.rnpBeat=beat
+end
+
 local function pulseAura(box,remaining,duration)
     if A.db.auraPulse==false or (not duration and (not remaining or remaining<=0 or remaining>3)) then
         if box.rnpPulse then
@@ -534,34 +563,7 @@ local function pulseAura(box,remaining,duration)
         end
         return
     end
-    if not box.rnpPulse then
-        local overlay=CreateFrame("Frame",nil,box)
-        overlay:SetAllPoints()
-        overlay:EnableMouse(false)
-        overlay:SetFrameLevel(box:GetFrameLevel()+8)
-        local flash=CreateFrame("Frame",nil,overlay)
-        flash:SetAllPoints()
-        flash:EnableMouse(false)
-        local glow=flash:CreateTexture(nil,"OVERLAY")
-        glow:SetPoint("TOPLEFT",-2,2)
-        glow:SetPoint("BOTTOMRIGHT",2,-2)
-        glow:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
-        glow:SetBlendMode("ADD")
-        glow:SetTexCoord(.16,.84,.16,.84)
-        glow:SetVertexColor(1,.82,.35)
-        box.rnpPulse=overlay
-        local beat=flash:CreateAnimationGroup()
-        beat:SetLooping("BOUNCE")
-        local grow=beat:CreateAnimation("Scale")
-        grow:SetScaleFrom(1,1)
-        grow:SetScaleTo(1.25,1.25)
-        grow:SetDuration(.32)
-        grow:SetSmoothing("IN_OUT")
-        local brighten=beat:CreateAnimation("Alpha")
-        brighten:SetFromAlpha(.18);brighten:SetToAlpha(1)
-        brighten:SetDuration(.32);brighten:SetSmoothing("IN_OUT")
-        box.rnpBeat=beat
-    end
+    if not box.rnpPulse then createExpiryPulse(box) end
     if not durationPulse(box,duration) then box.rnpPulse:SetAlpha(remaining and 1 or 0) end
     box.rnpPulse:Show()
     if not box.rnpBeat:IsPlaying() then box.rnpBeat:Play() end
@@ -590,46 +592,37 @@ local function objectCountdown(box,elapsed)
     pulseAura(box,nil,object)
 end
 
--- The ordinary duration label works for timed slows and roots as well as
--- refreshable effects. Drive its warning from the same native clock.
+-- The native button supplies one duration-text binding. Keep the visible
+-- number centred and use a transparent second line to open the glow clip
+-- during its final three seconds. No secret timestamp or text is read.
 local warningFormatter
 local function liveAuraFormatter()
     if A.db.auraPulse==false then return auraTimeFormatter() end
-    if warningFormatter then return warningFormatter end
-    local rules={{threshold=0,format=""}}
-    for i=0,11 do
-        local seconds=math.ceil((i+1)/4)
-        local digits=tostring(seconds)
-        local bright=i%2==0
-        rules[#rules+1]={threshold=i==0 and .000001 or i/4,
-            format=bright and ("|cffffbd38>"..digits.."<|r") or digits}
+    if not warningFormatter then
+        local spacer="\n|TInterface\\AddOns\\RaynnaNameplates\\PulseSpacer:1:160|t"
+        warningFormatter=C_StringUtil.CreateNumericRuleFormatter()
+        warningFormatter:SetBreakpoints({
+            {threshold=0,format=""},
+            {threshold=.000001,step=1,format="%d"..spacer},
+            {threshold=3.001,step=1,format="%d"},
+            {threshold=60,step=1,format="%dm",components={{div=60}}},
+            {threshold=3600,step=1,format="%dh",components={{div=3600}}},
+        })
     end
-    rules[#rules+1]={threshold=3.001,step=1,format="%d"}
-    rules[#rules+1]={threshold=60,step=1,format="%dm",components={{div=60}}}
-    rules[#rules+1]={threshold=3600,step=1,format="%dh",components={{div=3600}}}
-    warningFormatter=C_StringUtil.CreateNumericRuleFormatter()
-    warningFormatter:SetBreakpoints(rules)
     return warningFormatter
 end
 
-local function bindExpiryRing(button,caption,receiver)
-    if A.db.auraPulse==false or not receiver or not receiver.GetTimerDuration then return end
-    local function update()
-        local duration=receiver:GetTimerDuration()
-        if readable(duration) and duration and duration.EvaluateRemainingDuration then
-            pulseAura(button,nil,duration)
-        else pulseAura(button,0) end
-    end
-    local elapsed=0
-    caption:SetScript("OnUpdate",function(_,dt)
-        elapsed=elapsed+dt
-        if elapsed<.1 then return end
-        elapsed=0
-        if not pcall(update) then
-            pulseAura(button,0)
-            caption:SetScript("OnUpdate",nil)
-        end
-    end)
+local function bindExpiryRing(button,timer)
+    if A.db.auraPulse==false then return end
+    local clip=CreateFrame("Frame",nil,button,"DisableUntrustedLayoutScriptsTemplate")
+    clip:EnableMouse(false)
+    clip:SetClipsChildren(true)
+    clip:SetSize(36,36)
+    -- At 160 units wide the centred label's right edge is 80 units from
+    -- the icon centre. Ordinary countdown widths put this clip off the icon.
+    clip:SetPoint("CENTER",timer,"TOPRIGHT",-80,11.5)
+    createExpiryPulse(button,clip)
+    button.rnpBeat:Play()
 end
 
 local function updateCountdown(box,elapsed)
@@ -775,18 +768,19 @@ local function nativeAuras(f,u,enabled)
                         timer:SetTextColor(1,1,1)
                         timer:SetShadowOffset(1,-1)
                         timer:SetWordWrap(false)
+                        timer:SetJustifyH("CENTER")
                         button:SetDurationText(timer,{textFormatter=formatter})
                         timer:Show()
                         f.nativeThreatIcons = f.nativeThreatIcons or {}
                         table.insert(f.nativeThreatIcons,{icon=button,timer=timer})
                         local linear=A.db.auraSweep~=false and (A.db.auraSweepStyle or "Circle")~="Circle"
                         local receiver
-                        if button.SetDurationBar and (linear or A.db.auraPulse~=false) then
+                        if button.SetDurationBar and linear then
                             receiver=auraFill(button,art)
                             button:SetDurationBar(receiver,{direction=Enum.StatusBarTimerDirection.ElapsedTime})
                             sweepStyle(button)
                         end
-                        bindExpiryRing(button,caption,receiver)
+                        bindExpiryRing(button,timer)
                         if A.db.auraSweep~=false and not linear and button.SetDurationCooldown then
                             button:SetDurationCooldown(auraSweep(button,art))
                         end
