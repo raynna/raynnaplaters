@@ -173,8 +173,8 @@ local function friendlyPlayer(unit)
     return not UnitCanAttack("player",unit) and UnitIsFriend("player",unit)
 end
 local threatStates={[0]="Low threat",[1]="Gaining aggro",[2]="Losing lead",[3]="Holding aggro"}
-local function showThreat(f,status,percent,fallback,tint)
-    if not A.db.showThreat or (not threatStates[status] and not fallback) then
+local function showThreat(f,percent,tint)
+    if not A.db.showThreat or not readable(percent) or type(percent) ~= "number" then
         if f.threat then f.threat:Hide() end
         return
     end
@@ -185,12 +185,8 @@ local function showThreat(f,status,percent,fallback,tint)
     if position=="Left of bar" then label:SetPoint("RIGHT",f.health,"LEFT",-5,0)
     elseif position=="Above name" then label:SetPoint("BOTTOM",f.name,"TOP",0,2)
     else label:SetPoint("LEFT",f.health,"RIGHT",5,0) end
-    local format=A.db.threatFormat
-    if format=="Status" or not readable(percent) or type(percent)~="number" then
-        label:SetText(fallback or threatStates[status])
-    elseif format=="Percent" or tint=="partyAggro" then label:SetFormattedText("%d%%",math.floor(percent+.5))
-    else label:SetFormattedText("%s %d%%",fallback or threatStates[status],math.floor(percent+.5)) end
-    label:SetTextColor(color(tint or status>=2 and "aggro" or status==1 and "pulling" or "safe"))
+    label:SetFormattedText("%d%%", math.floor(percent + .5))
+    label:SetTextColor(color(tint))
     label:Show()
 end
 local function mobThreatToken(u)
@@ -266,21 +262,20 @@ local function combatThreat(f,u)
     if not readable(status) or not threatStates[status] then status=nil end
     if not readable(percent) then percent=nil end
     local victim=token.."target"
-    local key,label
+    local key
     if (status and status>=2) or (readable(tanking) and tanking) then
         key="aggro"
-        if not status then label="Holding aggro" end
     elseif status==1 then key="pulling"
-    elseif UnitIsUnit(victim,"player") then key,label="aggro","Targeting you"
+    elseif UnitIsUnit(victim,"player") then key="aggro"
     else
         key="safe"
         for i=1,GetNumSubgroupMembers() do
             local member="party"..i
             if holdsThreat(member,token) or (token~=u and holdsThreat(member,u)) then
-                key,label="partyAggro","Party aggro"
+                key="partyAggro"
                 break
             elseif holdsThreat("partypet"..i,token) or (token~=u and holdsThreat("partypet"..i,u)) then
-                key,label="partyAggro","Party pet aggro"
+                key="partyAggro"
                 break
             end
         end
@@ -293,14 +288,14 @@ local function combatThreat(f,u)
             shareThreat(threatPrefix, guid, "PARTY")
         elseif guid and key == "safe" and reports[guid] and reports[guid] > now
             and not UnitExists(victim) then
-            key,label = "partyAggro","Party aggro"
+            key = "partyAggro"
         end
     end
     if key == "safe" and not UnitExists(victim) and not UnitExists(u.."target")
         and partyTargetsInCombat(u) then
         key = "partyAggro"
     end
-    showThreat(f,status,percent,label,key)
+    showThreat(f,percent,key)
     return key
 end
 local function paint(f,u)
@@ -1097,7 +1092,7 @@ function A.PreviewMode()
     return A.previewModes[1],1
 end
 local function drawSample(f,mode,previewSelected)
-    showThreat(f,mode.npc and mode.reaction=="hostile" and not mode.service and 1 or nil,85)
+    showThreat(f,mode.npc and mode.reaction=="hostile" and not mode.service and 85 or nil,"pulling")
     f.quest=mode.objective
     f.dialogQuest=mode.dialogQuest
     if mode.service then
@@ -1318,7 +1313,7 @@ function A.InitWorld()
         local key=group[1]
         if A.db[key]==nil then A.db[key]=key=="targetScale" and 120 or 80 end
     end
-    for k,v in pairs({showThreat=false,threatPosition="Right of bar",threatFormat="Status + percent",questTint=true,questIcon=true,quest="FFBE32",townPlates=true,hideIdleNPCs=true,compactCompanions=true,showCompanionText=true,compactFriendly=true,previewTarget=true,targetOutline=true,auraScale=100,power=true,buffs=true,casts=true,castTimer=true,castHeight=14,debuffs=true,hideName=false,hostile="CC0613",neutral="FFEB2B",friendly="70FF90",aggro="CC0613",pulling="FFEB2B",partyAggro="56A8FF",safe="C7CFD9",castColor="903BCC"}) do
+    for k,v in pairs({showThreat=false,threatPosition="Right of bar",questTint=true,questIcon=true,quest="FFBE32",townPlates=true,hideIdleNPCs=true,compactCompanions=true,showCompanionText=true,compactFriendly=true,previewTarget=true,targetOutline=true,auraScale=100,power=true,buffs=true,casts=true,castTimer=true,castHeight=14,debuffs=true,hideName=false,hostile="CC0613",neutral="FFEB2B",friendly="70FF90",aggro="CC0613",pulling="FFEB2B",partyAggro="56A8FF",safe="C7CFD9",castColor="903BCC"}) do
         if A.db[k]==nil then A.db[k]=v end
     end
     for _,e in ipairs({"UNIT_TARGET","GROUP_ROSTER_UPDATE","PLAYER_GUILD_UPDATE","GOSSIP_SHOW","QUEST_DETAIL","QUEST_PROGRESS","QUEST_COMPLETE","QUEST_LOG_UPDATE","UNIT_POWER_UPDATE","UNIT_MAXPOWER","UNIT_DISPLAYPOWER","NAME_PLATE_UNIT_ADDED","NAME_PLATE_UNIT_REMOVED","PLAYER_TARGET_CHANGED","UNIT_HEALTH","UNIT_MAXHEALTH","UNIT_NAME_UPDATE","UNIT_FACTION","UNIT_FLAGS","UNIT_AURA","UNIT_THREAT_LIST_UPDATE","UNIT_THREAT_SITUATION_UPDATE","UNIT_SPELLCAST_START","UNIT_SPELLCAST_STOP","UNIT_SPELLCAST_FAILED","UNIT_SPELLCAST_INTERRUPTED","UNIT_SPELLCAST_DELAYED","UNIT_SPELLCAST_CHANNEL_START","UNIT_SPELLCAST_CHANNEL_UPDATE","UNIT_SPELLCAST_CHANNEL_STOP","PLAYER_REGEN_ENABLED","PLAYER_REGEN_DISABLED"}) do events:RegisterEvent(e) end
