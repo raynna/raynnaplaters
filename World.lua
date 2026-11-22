@@ -544,11 +544,11 @@ local function createExpiryPulse(box,parent)
     beat:SetLooping("BOUNCE")
     local grow=beat:CreateAnimation("Scale")
     grow:SetScaleFrom(1,1)
-    grow:SetScaleTo(1.075,1.075)
+    grow:SetScaleTo(1.14,1.14)
     grow:SetDuration(.55)
     grow:SetSmoothing("IN_OUT")
     local brighten=beat:CreateAnimation("Alpha")
-    brighten:SetFromAlpha(.38);brighten:SetToAlpha(.94)
+    brighten:SetFromAlpha(.32);brighten:SetToAlpha(1)
     brighten:SetDuration(.55);brighten:SetSmoothing("IN_OUT")
     box.rnpBeat=beat
 end
