@@ -37,10 +37,10 @@ function A.ServiceRole(unit)
     end
     local service=A.townServices[tonumber(id)]
     if service and service~=role then role,title=service,labels[service] end
-    if tracking[role] then return title,"Interface\\Minimap\\Tracking\\"..tracking[role] end
+    if tracking[role] then return title,"Interface\\Minimap\\Tracking\\"..tracking[role],role end
     if (not role or role=="vendor") and (A.repairNPCs[tonumber(id)] or
         (role=="vendor" and title and (title:lower():find("weaponsmith",1,true) or title:lower():find("armorsmith",1,true)))) then
-        return title or "Repairs","Interface\\Minimap\\Tracking\\Repair"
+        return title or "Repairs","Interface\\Minimap\\Tracking\\Repair","repair"
     end
-    if role then return title,"Interface\\GossipFrame\\"..sprites[role].."GossipIcon" end
+    if role then return title,"Interface\\GossipFrame\\"..sprites[role].."GossipIcon",role end
 end

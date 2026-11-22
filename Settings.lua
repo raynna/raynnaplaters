@@ -288,6 +288,7 @@ function A.RegisterSettings()
             A.db.viewDistance=value
             A.ApplyNativeDistance(value)
             A.RefreshPlateDistances()
+            if refreshDesigner then refreshDesigner() end
         end)
         check("General","showDistance","Show distance beside level","players range yards estimate")
         check("General","preview","Show live plate previews","test demo")
@@ -450,6 +451,7 @@ function A.RegisterSettings()
         search:SetScript("OnEscapePressed",function() search:SetText(""); search:ClearFocus() end)
         A.SyncOptions=function()
             for _,r in ipairs(rows) do if r.sync then r.sync() end end
+            if refreshDesigner then refreshDesigner() end
         end
         return function() A.SyncOptions();layout() end
     end)

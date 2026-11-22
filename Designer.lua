@@ -5,16 +5,23 @@ local parts = {
     {"distance","Distance"}, {"threat","Threat"}, {"guild","Guild"}, {"classBadge","Class icon"},
     {"questBadge","Quest icon"}, {"power","Resource bar"}, {"powerValue","Resource value"},
     {"cast","Cast bar"}, {"castText","Cast name"}, {"castTime","Cast timer"},
+    {"serviceName","Service name"}, {"serviceRole","Service role"}, {"serviceIcon","Service icon"}, {"serviceQuest","Service quest marker"},
+    {"objectLabel","NPC / object name"}, {"objectIcon","Interaction icon"}, {"petName","Pet name"}, {"petOwner","Pet owner"},
     {"buffPosition","Buffs"}, {"debuffPosition","Debuffs"}, {"controlPosition","Crowd control"},
 }
 local states = setmetatable({}, {__mode="k"})
 local renderingDraft
-local function options(key)
-    local layout=renderingDraft or A.db.designer
+function A.DesignLayout(frame)
+    local kind=frame and (frame.designType or (frame.isPersonal and "personal"))
+    local profiles=A.db.designerProfiles
+    return profiles and profiles[kind] or A.db.designer
+end
+local function options(key,frame)
+    local layout=renderingDraft or A.DesignLayout(frame)
     return layout and layout[key]
 end
-function A.DesignerAura(key)
-    local opt=options(key)
+function A.DesignerAura(key,frame)
+    local opt=options(key,frame)
     if opt then return opt.x,opt.y,opt.scale end
     return 0,0,1
 end
@@ -35,22 +42,22 @@ local function readAnchor(region,index)
         return point,parent,anchor,x,y
     end
 end
-local function transform(region,key,owners)
+local function transform(region,key,owners,frame)
     if not region or (not region.rnpAnchor and not region.rnpStretch and region.IsAnchoringRestricted and region:IsAnchoringRestricted()) then return end
-    local opt=options(key)
+    local opt=options(key,frame)
     local state=states[region]
     local compensate
     if owners then
         for i=1,(region.rnpAnchor and 1 or region.rnpStretch and 2 or region:GetNumPoints()) do
             local point,anchor=readAnchor(region,i)
             if not point then return end
-            if anchor and owners[anchor] and options(owners[anchor]) then compensate=true; break end
+            if anchor and owners[anchor] and options(owners[anchor],frame) then compensate=true; break end
         end
     end
     if not opt and not state and not compensate then return end
     state=state or {}
     states[region]=state
-    local dx,dy,scale=A.DesignerAura(key)
+    local dx,dy,scale=A.DesignerAura(key,frame)
     local count=region.rnpAnchor and 1 or region.rnpStretch and 2 or region:GetNumPoints()
     if count==0 then return end
     local points={}
@@ -87,7 +94,7 @@ local function transform(region,key,owners)
     for _,p in ipairs(points) do
         local x,y=dx,dy
         local parentKey=owners and owners[p.parent]
-        local moved=parentKey and options(parentKey)
+        local moved=parentKey and options(parentKey,frame)
         if moved then
             local units=p.parent:GetParent():GetEffectiveScale()/region:GetParent():GetEffectiveScale()
             x,y=x-moved.x*units,y-moved.y*units
@@ -115,19 +122,19 @@ local function transform(region,key,owners)
     if not opt and not compensate then states[region]=nil end
 end
 function A.DesignPlate(frame)
-    if not A.db or (not renderingDraft and not A.db.designer and not frame.wasDesigned) then return end
+    if not A.db or (not renderingDraft and not A.DesignLayout(frame) and not frame.wasDesigned) then return end
     local owners=frame.designerOwners or {}
     frame.designerOwners=owners
     for _,part in ipairs(parts) do
         local region=frame[part[1]]
         if region then owners[region]=part[1] end
     end
-    for _,part in ipairs(parts) do transform(frame[part[1]],part[1],owners) end
-    transform(frame.auraAnchor,"auraAnchor",owners)
-    frame.wasDesigned=renderingDraft~=nil or A.db.designer~=nil
+    for _,part in ipairs(parts) do transform(frame[part[1]],part[1],owners,frame) end
+    transform(frame.auraAnchor,"auraAnchor",owners,frame)
+    frame.wasDesigned=renderingDraft~=nil or A.DesignLayout(frame)~=nil
 end
 function A.DesignThreat(frame)
-    transform(frame.threat,"threat",frame.designerOwners)
+    transform(frame.threat,"threat",frame.designerOwners,frame)
 end
 
 function A.BuildDesigner(row, button, label, changed)
@@ -184,22 +191,57 @@ function A.BuildDesigner(row, button, label, changed)
     sample:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8",edgeFile="Interface\\Buttons\\WHITE8X8",edgeSize=1})
     sample:SetBackdropColor(.06,.045,.03,.96)
     sample:SetBackdropBorderColor(.48,.36,.17,1)
+    local mode=1
+    local function storeLayout(layout)
+        A.db.designerProfiles=A.db.designerProfiles or {}
+        A.db.designerProfiles[A.designerModes[mode].designType]=layout
+    end
     local selected=1
     local selectButton,readout
     local function sync()
         selectButton:SetText(parts[selected][2].." >")
-        local x,y,s=A.DesignerAura(parts[selected][1])
+        local x,y,s=A.DesignerAura(parts[selected][1],sample.sample)
         readout:SetText(("%+d, %+d   %d%%"):format(x,y,math.floor(s*100+.5)))
     end
     selectButton=button(toolbar,"",0,138,function() selected=selected%#parts+1;sync() end)
     readout=label(toolbar,"",145)
     button(toolbar,"Reset part",307,96,function()
-        if A.db.designer then A.db.designer[parts[selected][1]]=nil end
+        local copy={}
+        for k,v in pairs(A.DesignLayout(sample.sample) or {}) do if k~=parts[selected][1] then copy[k]=v end end
+        storeLayout(copy)
         changed(); A.DrawAuraExample(sample);sync()
     end)
     openRow.sync=function() sync();magnet:SetChecked(A.db.designerSnap~=false) end
     sync()
     sample.category="Designer"
+    sample.designerMode=A.designerModes[mode]
+    local picker=CreateFrame("Frame",nil,window,"BackdropTemplate")
+    picker:SetFrameLevel(window:GetFrameLevel()+60)
+    picker:SetBackdrop({bgFile="Interface\\Buttons\\WHITE8X8"})
+    picker:SetBackdropColor(.07,.05,.03,1)
+    picker:EnableMouse(true)
+    picker:Hide()
+    local typeButton=button(title,sample.designerMode.label or sample.designerMode.title,190,148,function() picker:SetShown(not picker:IsShown()) end)
+    picker:SetPoint("TOPLEFT",typeButton,"BOTTOMLEFT")
+    picker:SetSize(304,math.ceil(#A.designerModes/2)*24+6)
+    window:HookScript("OnHide",function() picker:Hide() end)
+    for index,entry in ipairs(A.designerModes) do
+        local b=button(picker,entry.label or entry.title,0,148,function()
+            mode=index
+            selected=1
+            if entry.compact then
+                local key=entry.service and "serviceName" or entry.designType=="companion" and "petName" or "objectLabel"
+                for i,part in ipairs(parts) do if part[1]==key then selected=i;break end end
+            end
+            sample.designerMode=entry
+            typeButton:SetText(entry.label or entry.title)
+            picker:Hide()
+            A.DrawAuraExample(sample)
+            sync()
+        end)
+        b:ClearAllPoints()
+        b:SetPoint("TOPLEFT",3+((index-1)%2)*150,-3-math.floor((index-1)/2)*24)
+    end
     local surface=CreateFrame("Frame",nil,sample)
     surface:SetAllPoints()
     surface:SetFrameLevel(sample:GetFrameLevel()+40)
@@ -361,13 +403,13 @@ function A.BuildDesigner(row, button, label, changed)
         end
         selected=hit
         local key=parts[selected][1]
-        local x,y,s=A.DesignerAura(key)
+        local x,y,s=A.DesignerAura(key,sample.sample)
         local cx,cy=GetCursorPosition()
         local region=sample.sample[key]
         local owner=region and region:GetParent() or sample.sample
         local units=owner:GetEffectiveScale()
         drag={mouse=mouse,key=key,x=x,y=y,scale=s,cx=cx,cy=cy,units=units,region=region}
-        drag.base=A.db.designer or {}
+        drag.base=A.DesignLayout(sample.sample) or {}
         drag.targets,drag.groups,drag.unitsByKey,drag.icons={},{},{},{}
         local function addBounds(r,k)
             local b=bounds(r)
@@ -400,7 +442,7 @@ function A.BuildDesigner(row, button, label, changed)
         local draft=drag.draft
         drag=nil
         sample.designerDragging=nil
-        if commit and draft then A.db.designer=draft;changed() end
+        if commit and draft then storeLayout(draft);changed() end
         if sample:IsVisible() then A.DrawAuraExample(sample);sync() end
     end
     surface:SetScript("OnUpdate",function()

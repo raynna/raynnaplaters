@@ -148,7 +148,7 @@ function A.PlayerHeading(owner,nameText,levelText,unit,sampleGuild,enemy)
     A.LayoutName(owner,nameText,levelText,true)
     local guild
     if enemy==nil then enemy=A.IsEnemyPlayer(unit) end
-    if owner.designerSample or A.PlateOption(owner,"showGuild",enemy) then
+    if A.PlateOption(owner,"showGuild",enemy) then
         guild=sampleGuild or (unit and GetGuildInfo and GetGuildInfo(unit))
         if issecretvalue and issecretvalue(guild) then guild=nil end
     end
@@ -234,7 +234,7 @@ local function badge(owner, unit, anchor, enemy)
     local icon = badges[owner]
     if icon then icon:Hide() end
     if enemy==nil then enemy=A.IsEnemyPlayer(unit) end
-    if not A.db or (not owner.designerSample and not A.PlateOption(owner,"badges",enemy)) or not unit or not UnitIsPlayer(unit) then return end
+    if not A.db or not A.PlateOption(owner,"badges",enemy) or not unit or not UnitIsPlayer(unit) then return end
     local _, class = UnitClass(unit)
     if issecretvalue and issecretvalue(class) then return end
     local readableClass = class and class:lower()

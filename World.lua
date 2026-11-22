@@ -597,38 +597,21 @@ end
 
 local function bindExpiryRing(button,caption,receiver)
     if A.db.auraPulse==false or not receiver or not receiver.GetTimerDuration then return end
-    local gate=CreateFrame("Frame",nil,caption)
-    gate:SetAllPoints(button)
-    gate:EnableMouse(false)
-    gate:SetAlpha(0)
-    local ring=gate:CreateTexture(nil,"OVERLAY")
-    ring:SetPoint("TOPLEFT",button,"TOPLEFT",-3,3)
-    ring:SetPoint("BOTTOMRIGHT",button,"BOTTOMRIGHT",3,-3)
-    ring:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
-    ring:SetTexCoord(.16,.84,.16,.84)
-    ring:SetVertexColor(1,.78,.15)
-    local beat=ring:CreateAnimationGroup()
-    beat:SetLooping("BOUNCE")
-    local alpha=beat:CreateAnimation("Alpha")
-    alpha:SetFromAlpha(.12);alpha:SetToAlpha(1);alpha:SetDuration(.25)
-    beat:Play()
-    local function updateGate()
-        local object=receiver:GetTimerDuration()
-        if readable(object) and object and object.EvaluateRemainingDuration and C_CurveUtil then
-            if not expiryCurve then
-                expiryCurve=C_CurveUtil.CreateCurve()
-                expiryCurve:AddPoint(0,0);expiryCurve:AddPoint(.001,1)
-                expiryCurve:AddPoint(3,1);expiryCurve:AddPoint(3.001,0)
-            end
-            gate:SetAlpha(object:EvaluateRemainingDuration(expiryCurve))
-        else gate:SetAlpha(0) end
+    local function update()
+        local duration=receiver:GetTimerDuration()
+        if readable(duration) and duration and duration.EvaluateRemainingDuration then
+            pulseAura(button,nil,duration)
+        else pulseAura(button,0) end
     end
     local elapsed=0
-    gate:SetScript("OnUpdate",function(_,dt)
+    caption:SetScript("OnUpdate",function(_,dt)
         elapsed=elapsed+dt
         if elapsed<.1 then return end
         elapsed=0
-        if not pcall(updateGate) then gate:SetScript("OnUpdate",nil) end
+        if not pcall(update) then
+            pulseAura(button,0)
+            caption:SetScript("OnUpdate",nil)
+        end
     end)
 end
 
@@ -688,7 +671,7 @@ local function anchorAura(widget,f,position,index,count,size,scale,key)
         if position:find("middle",1,true) then x=x+(width-count*size)/2
         elseif position:find("right",1,true) then x=x+width-count*size end
     end
-    local dx,dy = A.DesignerAura(key)
+    local dx,dy = A.DesignerAura(key,f)
     x,y=x+dx,y+dy
     widget:ClearAllPoints()
     widget:SetPoint("TOPLEFT",relative,anchor,x/scale,y/scale)
@@ -721,7 +704,7 @@ local function nativeAuras(f,u,enabled)
     local rows,placements={},{}
     local function addFilter(key,filter)
         local position=A.AuraPosition(key)
-        local edited=A.db.designer and A.db.designer[key]
+        local edited=A.DesignLayout(f) and A.DesignLayout(f)[key]
         local group=edited and key or position
         placements[group]={position,key}
         rows[group]=rows[group] or {}
@@ -730,7 +713,7 @@ local function nativeAuras(f,u,enabled)
     if supported then
         if A.PlateOption(f,"buffs") then addFilter("buffPosition",buffFilter) end
         if A.PlateOption(f,"debuffs") then
-            if A.AuraPosition("debuffPosition")==A.AuraPosition("controlPosition") and not (A.db.designer and (A.db.designer.debuffPosition or A.db.designer.controlPosition)) then
+            if A.AuraPosition("debuffPosition")==A.AuraPosition("controlPosition") and not (A.DesignLayout(f) and (A.DesignLayout(f).debuffPosition or A.DesignLayout(f).controlPosition)) then
                 addFilter("debuffPosition","HARMFUL|PLAYER")
             else
                 addFilter("debuffPosition",harmfulFilter)
@@ -799,7 +782,7 @@ local function nativeAuras(f,u,enabled)
             end
             f.auraLayouts[signature]=container
         end
-        local _,_,mult=A.DesignerAura(key)
+        local _,_,mult=A.DesignerAura(key,f)
         local scale=(A.db.auraScale or 100)*mult/100
         container:SetScale(scale)
         anchorAura(container,f,position,0,6*#filters,21*scale,scale,key)
@@ -885,7 +868,7 @@ local function auras(f,u,samples)
             elseif isControl(u,a) then key="controlPosition"
             else key="debuffPosition" end
             box.designKey=key
-            local _,_,mult=A.DesignerAura(key)
+            local _,_,mult=A.DesignerAura(key,f)
             local size=math.floor(21*(A.db.auraScale or 100)*mult/100+.5)
             box:SetSize(size,size)
             A.SetPlateFont(box.timer, math.max(6,math.floor(size*.42)))
@@ -893,7 +876,7 @@ local function auras(f,u,samples)
             box.timer:SetWordWrap(false)
             if helpful then top=top+1 elseif key=="controlPosition" then side=side+1 else bottom=bottom+1 end
             local position=A.AuraPosition(key)
-            if A.db.designer and A.db.designer[key] then position=key end
+            if A.DesignLayout(f) and A.DesignLayout(f)[key] then position=key end
             positions[position]=positions[position] or {}
             table.insert(positions[position],box)
             box.rim:SetColorTexture(.95,.15,.19,1)
@@ -997,16 +980,16 @@ local function isWorldObject(u)
     local level,hp=UnitLevel(u),UnitHealth(u)
     return readable(level) and level==0 and readable(hp) and hp==0
 end
-local function objectLabel(f,u)
+local function objectLabel(f,u,sampleName)
     if not f.objectLabel then
         f.objectLabel=text(f,14,"nameText")
-        f.objectLabel:SetPoint("CENTER")
+        A.AnchorPart(f.objectLabel,"CENTER")
         f.objectLabel:SetTextColor(.72,.93,1)
         f.objectIcon=f:CreateTexture(nil,"ARTWORK")
         f.objectIcon:SetSize(17,17)
-        f.objectIcon:SetPoint("RIGHT",f.objectLabel,"LEFT",-4,0)
+        A.AnchorPart(f.objectIcon,"RIGHT",f.objectLabel,"LEFT",-4,0)
     end
-    local name=UnitName(u)
+    local name=sampleName or UnitName(u)
     f.objectLabel:SetText(name)
     local portal=readable(name) and name and name:lower():find("portal",1,true)
     f.objectIcon:SetDesaturated(false)
@@ -1054,16 +1037,17 @@ local function servicePlaque(f,u,sampleName)
         panel:SetBackdropColor(.08,.055,.035,.86)
         panel.icon=panel:CreateTexture(nil,"ARTWORK")
         panel.icon:SetSize(23,23)
-        panel.icon:SetPoint("LEFT",5,0)
+        A.AnchorPart(panel.icon,"LEFT",5,0)
         panel.name=text(panel,14,"nameText")
-        panel.name:SetPoint("BOTTOMLEFT",panel,"LEFT",32,-1)
+        A.AnchorPart(panel.name,"BOTTOMLEFT",panel,"LEFT",32,-1)
         panel.role=text(panel,11,"serviceText")
-        panel.role:SetPoint("TOPLEFT",panel,"LEFT",32,-1)
+        A.AnchorPart(panel.role,"TOPLEFT",panel,"LEFT",32,-1)
         panel.role:SetTextColor(.98,.82,.52)
         panel.quest=panel:CreateTexture(nil,"OVERLAY")
         panel.quest:SetTexture("Interface\\GossipFrame\\AvailableQuestIcon")
         panel.quest:SetSize(15,15)
-        panel.quest:SetPoint("LEFT",panel,"RIGHT",2,0)
+        A.AnchorPart(panel.quest,"LEFT",panel,"RIGHT",2,0)
+        f.serviceName,f.serviceRole,f.serviceIcon,f.serviceQuest=panel.name,panel.role,panel.icon,panel.quest
         f.servicePanel=panel
     end
     local panel=f.servicePanel
@@ -1121,22 +1105,26 @@ local function companionCaption(f,unit)
     end
     return "Companion"
 end
-local function showCompanionText(f,u)
-    if not A.db.showCompanionText then return end
+local function showCompanionText(f,u,sampleName)
+    if not A.db.showCompanionText then
+        if f.companionLabel then f.companionLabel:Hide() end
+        return
+    end
     if not f.companionLabel then
         local label=CreateFrame("Frame",nil,f)
         label:SetAllPoints(f)
         label.name=text(label,14,"nameText")
-        label.name:SetPoint("BOTTOM",label,"CENTER",0,0)
+        A.AnchorPart(label.name,"BOTTOM",label,"CENTER",0,0)
         label.owner=text(label,11,"serviceText")
-        label.owner:SetPoint("TOP",label.name,"BOTTOM",0,-1)
+        A.AnchorPart(label.owner,"TOP",label.name,"BOTTOM",0,-1)
         label.owner:SetTextColor(.98,.82,.52)
+        f.petName,f.petOwner=label.name,label.owner
         f.companionLabel=label
     end
     local label=f.companionLabel
-    label.name:SetText(UnitName(u))
+    label.name:SetText(sampleName or UnitName(u))
     label.name:SetTextColor(color("friendly"))
-    label.owner:SetText(companionCaption(f,u))
+    label.owner:SetText(sampleName and "Mira Dawnvale's pet" or companionCaption(f,u))
     label:Show()
 end
 local function friendlyNPCLayout(f,friendly,nonAttackable,companion,object,inCombat)
@@ -1151,7 +1139,7 @@ local function refresh(f,u)
         f.dialogQuest,f.talk=A.NPCInteraction(u)
     end
     if not f.serviceChecked then
-        f.serviceTitle,f.serviceSprite=A.ServiceRole(u)
+        f.serviceTitle,f.serviceSprite,f.serviceKind=A.ServiceRole(u)
         f.serviceChecked=true
     end
     extraChat(f,nil,false)
@@ -1185,6 +1173,7 @@ local function refresh(f,u)
     if f.objectOnly then f.distance:Hide(); showThreat(f,nil) end
     if f.guild then f.guild:Hide() end
     if f.objectOnly then
+        f.designType=companion and "companion" or object and "object" or nameOnly and "idle" or f.serviceKind or (f.dialogQuest and "questGiver") or "talk"
         f:SetScale(.94*groupScale("friendlyNPCScale"))
         A.Badge(f,nil,f.name)
         f.power:Hide()
@@ -1195,6 +1184,7 @@ local function refresh(f,u)
             if f.questBadge then f.questBadge:Hide() end
             if f.objectLabel then f.objectLabel:Hide(); f.objectIcon:Hide() end
             showCompanionText(f,u)
+            A.DesignPlate(f)
             return
         end
         objectLabel(f,u)
@@ -1202,6 +1192,7 @@ local function refresh(f,u)
             f.objectIcon:Hide()
             if f.questBadge then f.questBadge:Hide() end
             f.objectLabel:SetTextColor(color("friendly"))
+            A.DesignPlate(f)
             return
         end
         if not object then
@@ -1229,6 +1220,7 @@ local function refresh(f,u)
             servicePlaque(f,u)
         end
         if f.questBadge then f.questBadge:Hide() end
+        A.DesignPlate(f)
         return
     elseif f.objectLabel then
         f.objectLabel:Hide()
@@ -1238,6 +1230,12 @@ local function refresh(f,u)
     local group
     if UnitIsPlayer(u) then group = friendlyPlayer(u) and "friendlyPlayerScale" or "enemyPlayerScale"
     else group = friendly and "friendlyNPCScale" or "enemyNPCScale" end
+    f.designType=group
+    if group=="enemyNPCScale" then
+        local reaction=UnitReaction("player",u)
+        if f.quest then f.designType="questMob"
+        elseif readable(reaction) and reaction==4 then f.designType="neutral" end
+    end
     f:SetScale(.94 * groupScale(group) * (UnitIsUnit(u,"target") and groupScale("targetScale") or 1))
     nameMarker(f)
     if UnitIsPlayer(u) then
@@ -1435,6 +1433,32 @@ A.previewModes = {
     {key="enemyPlayerScale", title="Enemy player", name="Drok", surname="Ironhand", guild="Blackrock Watch", reaction="hostile"},
     {key="personal", title="Personal", reaction="friendly"}
 }
+A.designerModes={}
+for _,mode in ipairs(A.previewModes) do
+    mode.designType=mode.key
+    A.designerModes[#A.designerModes+1]=mode
+end
+local function addMode(kind,label,name,title,texture)
+    table.insert(A.designerModes,{designType=kind,label=label,name=name,title=title,
+        key=kind=="questMob" and "enemyNPCScale" or "friendlyNPCScale",npc=true,
+        reaction=kind=="questMob" and "hostile" or "friendly",objective=kind=="questMob",
+        service=texture,compact=kind~="questMob"})
+end
+table.insert(A.designerModes,{designType="neutral",key="enemyNPCScale",title="Neutral NPC",name="Zhevra Runner",reaction="neutral",npc=true})
+addMode("questGiver","Quest giver","Vehena")
+addMode("questMob","Quest monster","Hillsbrad Farmer")
+addMode("idle","Idle NPC","Deathguard Samsa")
+addMode("talk","Talkable NPC","Orgrimmar Grunt")
+addMode("companion","Pet / minion","Donna")
+addMode("object","World object","Portal to Undercity")
+addMode("vendor","Vendor","Xan'tish","Snake Vendor","Interface\\GossipFrame\\VendorGossipIcon")
+addMode("trainer","Trainer","Uthel'nay","Mage Trainer","Interface\\GossipFrame\\TrainerGossipIcon")
+addMode("repair","Repairs","Ott","Weaponsmith","Interface\\Minimap\\Tracking\\Repair")
+addMode("flight","Flight master","Doras","Wind Rider Master","Interface\\Minimap\\Tracking\\FlightMaster")
+addMode("inn","Innkeeper","Gryshka","Innkeeper","Interface\\Minimap\\Tracking\\Innkeeper")
+addMode("bank","Banker","Karus","Banker","Interface\\Minimap\\Tracking\\Banker")
+addMode("auction","Auctioneer","Auctioneer Wabang","Auctioneer","Interface\\Minimap\\Tracking\\Auctioneer")
+addMode("stable","Stable master","Theodore Mont Claire","Stable Master","Interface\\Minimap\\Tracking\\StableMaster")
 function A.PreviewMode()
     for index,mode in ipairs(A.previewModes) do
         if mode.key==A.db.previewMode then return mode,index end
@@ -1442,14 +1466,27 @@ function A.PreviewMode()
     return A.previewModes[1],1
 end
 local function drawSample(f,mode,previewSelected)
+    f.designType=mode.designType or mode.key
     showThreat(f,mode.npc and mode.reaction=="hostile" and not mode.service and 85 or nil,"pulling")
     f.quest=mode.objective
     f.dialogQuest=mode.dialogQuest
-    if mode.service then
+    if mode.service or mode.compact then
+        selectPlate(f,false)
         f.health:Hide(); f.name:Hide(); f.level:Hide(); f.power:Hide(); f.cast:Hide()
         f.serviceSprite,f.serviceTitle=mode.service,mode.title
         f:SetScale(.94*groupScale("friendlyNPCScale"))
-        servicePlaque(f,nil,mode.name)
+        f.value:Hide();f.distance:Hide()
+        f.quest=mode.objective
+        if mode.designType=="questGiver" then f.dialogQuest="offer" end
+        if mode.service then servicePlaque(f,nil,mode.name)
+        elseif mode.designType=="companion" then showCompanionText(f,nil,mode.name)
+        else
+            objectLabel(f,nil,mode.name)
+            f.objectIcon:SetShown(mode.designType=="object" or mode.designType=="talk" or (mode.designType=="questGiver" and A.db.questIcon))
+            if mode.designType=="questGiver" then f.objectIcon:SetTexture(marker(f)) end
+            if mode.designType=="talk" then f.objectIcon:SetTexture("Interface\\GossipFrame\\GossipGossipIcon") end
+        end
+        A.DesignPlate(f)
         return
     end
     nameMarker(f)
@@ -1503,8 +1540,15 @@ local function drawSample(f,mode,previewSelected)
     A.DesignPlate(f)
 end
 function A.DrawAuraExample(parent)
+    if parent.designerMode then
+        parent.samplesByType=parent.samplesByType or {}
+        local nextSample=parent.samplesByType[parent.designerMode.designType]
+        if parent.sample and parent.sample~=nextSample then parent.sample:Hide() end
+        parent.sample=nextSample
+    end
     if not parent.sample then
         parent.sample=create(parent)
+        if parent.designerMode then parent.samplesByType[parent.designerMode.designType]=parent.sample end
         parent:SetScript("OnUpdate",function(frame,elapsed)
             if frame.designerDragging then return end
             frame.exampleElapsed=(frame.exampleElapsed or 0)+elapsed
@@ -1514,6 +1558,7 @@ function A.DrawAuraExample(parent)
             end
         end)
     end
+    parent.sample:Show()
     local category=parent.category
     local mode=A.previewModes[1]
     if category=="Players" then mode=A.previewModes[A.db.previewEnemyPlayer and 4 or 3]
@@ -1523,24 +1568,8 @@ function A.DrawAuraExample(parent)
     elseif category=="Quests" then
         mode={key="enemyNPCScale",name="Quest objective",reaction="hostile",npc=true,objective=true}
     elseif category=="NPCs" and A.db.previewFriendlyNPC then mode=A.previewModes[2] end
-    if category=="Designer" then mode=A.previewModes[3] end
-    parent.sample.designerSample=category=="Designer"
+    mode=parent.designerMode or mode
     drawSample(parent.sample,mode,category=="Targeting")
-    if category=="Designer" then
-        local f=parent.sample
-        f.quest=true
-        nameMarker(f)
-        f.distance:SetText("32 yd"); f.distance:Show()
-        f.level:Show(); f.value:Show()
-        f.power:Show()
-        if not f.powerValue then
-            f.powerValue=text(f.power,10,"resourceText")
-            A.AnchorPart(f.powerValue,"CENTER")
-        end
-        f.power:SetHeight(math.max(12,f.power:GetHeight()))
-        f.powerValue:SetText("75%"); f.powerValue:Show()
-        showThreat(f,85,"pulling")
-    end
     A.DesignPlate(parent.sample)
     local scale=parent.sample:GetScale()*UIParent:GetEffectiveScale()/parent:GetEffectiveScale()
     if parent.PositionCamera then
