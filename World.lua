@@ -454,7 +454,8 @@ local function auraSweep(box,art)
         sweep:SetHideCountdownNumbers(true)
         sweep:SetDrawEdge(false)
         sweep:SetReverse(true)
-        sweep:SetSwipeColor(.32,.32,.32,.72)
+        sweep:SetSwipeColor(0,0,0,.40)
+        if sweep.SetDrawBling then sweep:SetDrawBling(false) end
         box.rnpSweep=sweep
     end
     return box.rnpSweep
@@ -466,7 +467,7 @@ local function auraFill(box,art)
         fill:SetAllPoints(art)
         fill:EnableMouse(false)
         fill:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
-        fill:SetStatusBarColor(.30,.30,.30,.82)
+        fill:SetStatusBarColor(0,0,0,.40)
         box.rnpFill=fill
     end
     return box.rnpFill
@@ -514,9 +515,6 @@ local function pulseAura(box,remaining,duration)
         local flash=CreateFrame("Frame",nil,overlay)
         flash:SetAllPoints()
         flash:EnableMouse(false)
-        local wash=flash:CreateTexture(nil,"ARTWORK")
-        wash:SetAllPoints()
-        wash:SetColorTexture(1,.75,.24,.32)
         local glow=flash:CreateTexture(nil,"OVERLAY")
         glow:SetPoint("TOPLEFT",-2,2)
         glow:SetPoint("BOTTOMRIGHT",2,-2)
@@ -565,23 +563,21 @@ local function objectCountdown(box,elapsed)
     pulseAura(box,nil,object)
 end
 
-local function nativePulse(sweep,elapsed)
-    sweep.rnpTick=(sweep.rnpTick or 0)+elapsed
-    if sweep.rnpTick<.1 then return end
-    sweep.rnpTick=0
-    local box=sweep:GetParent()
-    local fill=box.rnpFill
-    local object=fill and fill.GetTimerDuration and fill:GetTimerDuration()
-    if readable(object) and object and object.EvaluateRemainingDuration and C_CurveUtil then
-        pulseAura(box,nil,object)
-        return
-    end
-    local start,duration=sweep:GetCooldownTimes()
-    local remaining
-    if readable(start) and readable(duration) and type(start)=="number" and type(duration)=="number" and duration>0 then
-        remaining=(start+duration)/1000-GetTime()
-    end
-    pulseAura(sweep:GetParent(),remaining)
+local function bindExpiryRing(button,caption)
+    if A.db.auraPulse==false or not button.AddPandemicRegion or not button.AddPandemicActiveAnimation then return end
+    local ring=caption:CreateTexture(nil,"OVERLAY")
+    ring:SetPoint("TOPLEFT",button,"TOPLEFT",-3,3)
+    ring:SetPoint("BOTTOMRIGHT",button,"BOTTOMRIGHT",3,-3)
+    ring:SetTexture("Interface\\Buttons\\UI-ActionButton-Border")
+    ring:SetTexCoord(.16,.84,.16,.84)
+    ring:SetVertexColor(1,.78,.15)
+    ring:Hide()
+    local beat=ring:CreateAnimationGroup()
+    beat:SetLooping("BOUNCE")
+    local alpha=beat:CreateAnimation("Alpha")
+    alpha:SetFromAlpha(.18);alpha:SetToAlpha(1);alpha:SetDuration(.32)
+    button:AddPandemicRegion(ring)
+    button:AddPandemicActiveAnimation(beat)
 end
 
 local function updateCountdown(box,elapsed)
@@ -693,7 +689,7 @@ local function nativeAuras(f,u,enabled)
     local activeRows={}
     for group,filters in pairs(rows) do
         local position,key=unpack(placements[group])
-        local signature=table.concat(filters,";")
+        local signature=table.concat(filters,";").."|"..(A.db.auraSweep~=false and (A.db.auraSweepStyle or "Circle") or "Off").."|"..tostring(A.db.auraPulse~=false)
         activeRows[signature]=true
         local container=f.auraLayouts[signature]
         if not container then
@@ -716,28 +712,31 @@ local function nativeAuras(f,u,enabled)
                         art:SetPoint("BOTTOMRIGHT",-2,2)
                         art:SetTexCoord(.07,.93,.07,.93)
                         button:SetIcon(art)
-                        if button.SetDurationBar then
-                            local fill=auraFill(button,art)
-                            button:SetDurationBar(fill,{direction=Enum.StatusBarTimerDirection.ElapsedTime})
-                        end
-                        if button.SetDurationCooldown then
-                            local sweep=auraSweep(button,art)
-                            sweepStyle(button)
-                            button:SetDurationCooldown(sweep)
-                            sweep:HookScript("OnHide",function() pulseAura(button,nil) end)
-                            if A.db.auraPulse~=false then sweep:SetScript("OnUpdate",nativePulse) end
-                        end
                         local caption=CreateFrame("Frame",nil,button)
                         caption:SetAllPoints()
                         caption:SetFrameLevel(button:GetFrameLevel()+10)
                         caption:EnableMouse(false)
-                        local timer=text(caption,12,"auraText")
+                        local timer=caption:CreateFontString(nil,"OVERLAY","NumberFontNormal")
+                        timer.rnpRole="auraText"
+                        A.SetPlateFont(timer,12)
                         timer:SetPoint("TOP",button,"BOTTOM",0,-1)
-                        timer:SetWidth(0)
+                        timer:SetTextColor(1,1,1)
+                        timer:SetShadowOffset(1,-1)
                         timer:SetWordWrap(false)
+                        button:SetDurationText(timer,{textFormatter=formatter})
+                        timer:Show()
                         f.nativeThreatIcons = f.nativeThreatIcons or {}
                         table.insert(f.nativeThreatIcons,{icon=button,timer=timer})
-                        button:SetDurationText(timer,{textFormatter=formatter})
+                        bindExpiryRing(button,caption)
+                        if A.db.auraSweep~=false then
+                            if (A.db.auraSweepStyle or "Circle")=="Circle" and button.SetDurationCooldown then
+                                button:SetDurationCooldown(auraSweep(button,art))
+                            elseif button.SetDurationBar then
+                                local fill=auraFill(button,art)
+                                button:SetDurationBar(fill,{direction=Enum.StatusBarTimerDirection.ElapsedTime})
+                                sweepStyle(button)
+                            end
+                        end
                     end,
                     maxFrameCount=6,
                     sortMethod=AuraContainerSortMethod.Default,
@@ -761,14 +760,6 @@ local function nativeAuras(f,u,enabled)
             container:Hide()
         end
     end
-    for _,entry in ipairs(f.nativeThreatIcons or {}) do
-        local sweep=entry.icon.rnpSweep
-        if sweep then
-            sweepStyle(entry.icon)
-            sweep:SetScript("OnUpdate",A.db.auraPulse~=false and nativePulse or nil)
-            if A.db.auraPulse==false then pulseAura(entry.icon,nil) end
-        end
-    end
     return supported
 end
 local function accessible(t)
@@ -788,7 +779,7 @@ local function auras(f,u,samples)
     local seen={}
     local positions={}
     if u and u~="player" and UnitIsUnit(u,"target") then u="target" end
-    local native = nativeAuras(f,u,not samples and C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret())
+    local native = nativeAuras(f,u,not samples and u and (not UnitIsPlayer(u) or (C_Secrets and C_Secrets.ShouldAurasBeSecret and C_Secrets.ShouldAurasBeSecret())))
     if not native and (samples or C_UnitAuras) then
         for _,filter in ipairs(A.db.castableBuffs and castableAuras or allAuras) do
         local helpfulQuery=filter:sub(1,7)=="HELPFUL"
