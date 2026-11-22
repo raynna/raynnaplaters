@@ -11,9 +11,13 @@ local parts = {
 }
 local states = setmetatable({}, {__mode="k"})
 local renderingDraft
-function A.MergeServiceDesigns(db)
+function A.MergeDesignerProfiles(db)
     local profiles=db.designerProfiles
     if not profiles then return end
+    for _,kind in ipairs({"enemyNPCScale","friendlyNPCScale","neutral","questMob"}) do
+        if profiles.npc==nil then profiles.npc=profiles[kind] end
+        profiles[kind]=nil
+    end
     for _,kind in ipairs({"trainer","vendor","repair","flight","inn","bank","auction","stable"}) do
         if profiles.service==nil then profiles.service=profiles[kind] end
         profiles[kind]=nil

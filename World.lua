@@ -1239,12 +1239,7 @@ local function refresh(f,u)
     local group
     if UnitIsPlayer(u) then group = friendlyPlayer(u) and "friendlyPlayerScale" or "enemyPlayerScale"
     else group = friendly and "friendlyNPCScale" or "enemyNPCScale" end
-    f.designType=group
-    if group=="enemyNPCScale" then
-        local reaction=UnitReaction("player",u)
-        if f.quest then f.designType="questMob"
-        elseif readable(reaction) and reaction==4 then f.designType="neutral" end
-    end
+    f.designType=UnitIsPlayer(u) and group or "npc"
     f:SetScale(.94 * groupScale(group) * (UnitIsUnit(u,"target") and groupScale("targetScale") or 1))
     nameMarker(f)
     if UnitIsPlayer(u) then
@@ -1444,18 +1439,15 @@ A.previewModes = {
 }
 A.designerModes={}
 for _,mode in ipairs(A.previewModes) do
-    mode.designType=mode.key
-    A.designerModes[#A.designerModes+1]=mode
+    mode.designType=mode.npc and "npc" or mode.key
+    if mode==A.previewModes[1] then mode.label="NPC" end
+    if mode~=A.previewModes[2] then table.insert(A.designerModes,mode) end
 end
 local function addMode(kind,label,name,title,texture)
     table.insert(A.designerModes,{designType=kind,label=label,name=name,title=title,
-        key=kind=="questMob" and "enemyNPCScale" or "friendlyNPCScale",npc=true,
-        reaction=kind=="questMob" and "hostile" or "friendly",objective=kind=="questMob",
-        service=texture,compact=kind~="questMob"})
+        key="friendlyNPCScale",npc=true,reaction="friendly",service=texture,compact=true})
 end
-table.insert(A.designerModes,{designType="neutral",key="enemyNPCScale",title="Neutral NPC",name="Zhevra Runner",reaction="neutral",npc=true})
 addMode("questGiver","Quest giver","Vehena")
-addMode("questMob","Quest monster","Hillsbrad Farmer")
 addMode("idle","Idle NPC","Deathguard Samsa")
 addMode("talk","Talkable NPC","Orgrimmar Grunt")
 addMode("companion","Pet / minion","Donna")
@@ -1468,7 +1460,7 @@ function A.PreviewMode()
     return A.previewModes[1],1
 end
 local function drawSample(f,mode,previewSelected)
-    f.designType=mode.designType or mode.key
+    f.designType=mode.designType or (mode.npc and "npc") or mode.key
     showThreat(f,mode.npc and mode.reaction=="hostile" and not mode.service and 85 or nil,"pulling")
     f.quest=mode.objective
     f.dialogQuest=mode.dialogQuest
