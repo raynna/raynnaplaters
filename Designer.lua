@@ -55,10 +55,10 @@ local function transform(region,key)
         if w~=state.outW or h~=state.outH then state.w,state.h=w,h end
         state.outW,state.outH=state.w*scale,state.h*scale
         region:SetSize(state.outW,state.outH)
+        state.outW,state.outH=region:GetSize()
     end
     local factor=region.SetScale and not state.fontBase and not region.SetTextScale and not stretch and scale or 1
     local w,h=region:GetParent():GetSize()
-    region:ClearAllPoints()
     for _,p in ipairs(points) do
         local x,y=dx,dy
         if stretch then
@@ -67,7 +67,14 @@ local function transform(region,key)
         end
         p.outX,p.outY=(p.x+x)/factor,(p.y+y)/factor
         region:SetPoint(p.point,p.parent,p.anchor,p.outX,p.outY)
+        -- WoW stores anchors at client precision. Cache the values it actually
+        -- returns so a redraw cannot mistake rounding for a fresh layout.
         state[p.point]=p
+    end
+    for i=1,region:GetNumPoints() do
+        local point,parent,anchor,x,y=region:GetPoint(i)
+        local p=state[point]
+        p.parent,p.anchor,p.outX,p.outY=parent,anchor,x,y
     end
     if not opt then states[region]=nil end
 end
@@ -139,14 +146,28 @@ function A.BuildDesigner(row, button, label, changed)
         local key=parts[selected][1]
         local x,y,s=A.DesignerAura(key)
         local cx,cy=GetCursorPosition()
-        drag={mouse=mouse,key=key,x=x,y=y,scale=s,cx=cx,cy=cy}
+        local region=sample.sample[key]
+        local owner=region and region:GetParent() or sample.sample
+        local units=owner:GetEffectiveScale()
+        drag={mouse=mouse,key=key,x=x,y=y,scale=s,cx=cx,cy=cy,units=units,region=region}
+        if not region then
+            drag.icons={}
+            for _,icon in ipairs(sample.sample.icons or {}) do
+                if icon.designKey==key and icon:IsShown() then
+                    local point,parent,anchor,px,py=icon:GetPoint(1)
+                    table.insert(drag.icons,{icon=icon,point=point,parent=parent,anchor=anchor,
+                        x=px,y=py,width=icon:GetWidth(),height=icon:GetHeight()})
+                end
+            end
+        end
+        sample.designerDragging=true
         sync()
     end)
     surface:SetScript("OnUpdate",function()
         if not drag then return end
-        if not IsMouseButtonDown(drag.mouse) then drag=nil;changed();return end
+        if not IsMouseButtonDown(drag.mouse) then drag=nil;sample.designerDragging=nil;changed();A.DrawAuraExample(sample);return end
         local cx,cy=GetCursorPosition()
-        local factor=sample.sample:GetEffectiveScale()
+        local factor=drag.units
         local dx,dy=(cx-drag.cx)/factor,(cy-drag.cy)/factor
         local function round(n) return math.floor(n+.5) end
         local x,y,s=drag.x,drag.y,drag.scale
@@ -157,11 +178,22 @@ function A.BuildDesigner(row, button, label, changed)
         drag.lastX,drag.lastY,drag.lastScale=x,y,s
         A.db.designer=A.db.designer or {}
         A.db.designer[drag.key]={x=x,y=y,scale=s}
-        A.DrawAuraExample(sample)
+        if drag.region then
+            transform(drag.region,drag.key)
+        else
+            local first=drag.icons[1]
+            for _,saved in ipairs(drag.icons) do
+                local ratio=s/drag.scale
+                local icon=saved.icon
+                icon:SetSize(saved.width*ratio,saved.height*ratio)
+                icon:SetPoint(saved.point,saved.parent,saved.anchor,
+                    saved.x+(x-drag.x)+(saved.x-first.x)*(ratio-1),saved.y+(y-drag.y))
+            end
+        end
         sync()
     end)
     local function finish()
-        if drag then drag=nil;changed() end
+        if drag then drag=nil;sample.designerDragging=nil;changed();A.DrawAuraExample(sample) end
     end
     surface:SetScript("OnMouseUp",finish)
     surface:SetScript("OnHide",finish)

@@ -35,6 +35,7 @@ function A.AddIndicators(f)
     f.castTime:SetPoint("RIGHT",-2,0)
     f.cast:SetScript("OnUpdate",function(c)
         local now = GetTime()
+        if f:GetParent().designerDragging then return end
         if now >= c.finish then c:Hide() return end
         c:SetValue(c.channel and c.finish-now or now-c.start)
         c:GetParent().castTime:SetFormattedText("%.1f",c.finish-now)
@@ -1258,6 +1259,7 @@ function A.DrawAuraExample(parent)
     if not parent.sample then
         parent.sample=create(parent)
         parent:SetScript("OnUpdate",function(frame,elapsed)
+            if frame.designerDragging then return end
             frame.exampleElapsed=(frame.exampleElapsed or 0)+elapsed
             if frame.exampleElapsed>=3.8 then
                 frame.exampleElapsed=0
