@@ -218,6 +218,32 @@ local function holdsThreat(member, mob)
     return readable(rank) and rank and rank >= 2
 end
 
+-- A tank can have a detailed threat table for a mob that another party member
+-- cannot inspect. Relay only personal tanking observations, keyed by mob GUID.
+local threatPrefix = "RNPThreat1"
+local reports, lastSent = {}, {}
+local shareThreat
+local function mobGUID(unit)
+    local guid = UnitGUID(unit)
+    if readable(guid) and type(guid) == "string" then return guid end
+end
+
+local function receiveThreat(prefix, guid, channel, sender)
+    if prefix ~= threatPrefix or channel ~= "PARTY" or #guid > 100 then return end
+    for i = 1, GetNumSubgroupMembers() do
+        local member = "party"..i
+        local name, realm = UnitFullName(member)
+        if name and (sender == name or sender == name.."-"..(realm or GetNormalizedRealmName())) then
+            local now = GetTime()
+            for id, expires in pairs(reports) do
+                if expires <= now then reports[id] = nil end
+            end
+            reports[guid] = now + 3
+            return
+        end
+    end
+end
+
 local function combatThreat(f,u)
     local token=mobThreatToken(u)
     local status,percent,tanking
@@ -238,13 +264,24 @@ local function combatThreat(f,u)
         key="safe"
         for i=1,GetNumSubgroupMembers() do
             local member="party"..i
-            if holdsThreat(member,token) then
+            if holdsThreat(member,token) or (token~=u and holdsThreat(member,u)) then
                 key,label="partyAggro","Party aggro"
                 break
-            elseif holdsThreat("partypet"..i,token) then
+            elseif holdsThreat("partypet"..i,token) or (token~=u and holdsThreat("partypet"..i,u)) then
                 key,label="partyAggro","Party pet aggro"
                 break
             end
+        end
+    end
+    if GetNumSubgroupMembers() > 0 then
+        local guid = mobGUID(u)
+        local now = GetTime()
+        if guid and key == "aggro" and shareThreat and (lastSent[guid] or -2) <= now-1.5 then
+            lastSent[guid] = now
+            shareThreat(threatPrefix, guid, "PARTY")
+        elseif guid and key == "safe" and reports[guid] and reports[guid] > now
+            and not UnitExists(victim) then
+            key,label = "partyAggro","Party aggro"
         end
     end
     showThreat(f,status,percent,label or (not status and "Threat unknown"),key)
@@ -1237,6 +1274,12 @@ function A.ApplyNativeDistance(value)
     end
 end
 function A.InitWorld()
+    local register = C_ChatInfo and C_ChatInfo.RegisterAddonMessagePrefix or RegisterAddonMessagePrefix
+    if register then
+        register(threatPrefix)
+        shareThreat = C_ChatInfo and C_ChatInfo.SendAddonMessage or SendAddonMessage
+        events:RegisterEvent("CHAT_MSG_ADDON")
+    end
     if A.db.viewDistance~=nil then
         A.db.viewDistance=A.ClampDistance(A.db.viewDistance)
         A.ApplyNativeDistance(A.db.viewDistance)
@@ -1269,7 +1312,9 @@ function A.InitWorld()
         end
     end
 end
-events:SetScript("OnEvent",function(_,e,u)
+events:SetScript("OnEvent",function(_,e,u,...)
+    if e=="CHAT_MSG_ADDON" then receiveThreat(u,...); return end
+    if e=="GROUP_ROSTER_UPDATE" or e=="PLAYER_REGEN_ENABLED" then wipe(reports); wipe(lastSent) end
     if e=="PLAYER_REGEN_ENABLED" and distancePending then A.ApplyNativeDistance(A.db.viewDistance) end
     if e=="GOSSIP_SHOW" or e=="QUEST_DETAIL" or e=="QUEST_PROGRESS" or e=="QUEST_COMPLETE" then
         A.ObserveConversation(e)
