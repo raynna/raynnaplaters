@@ -1,4 +1,29 @@
 local _, A = ...
+
+function A.SizeScrollThumb(scroll)
+    local bar = scroll.ScrollBar
+    local thumb = bar:GetThumbTexture()
+    thumb:SetColorTexture(0.68, 0.50, 0.23, 1)
+    thumb:SetWidth(10)
+    local function resize()
+        local track = bar:GetHeight()
+        local viewport = scroll:GetHeight()
+        if track <= 0 or viewport <= 0 then
+            return
+        end
+        local range = scroll:GetVerticalScrollRange()
+        bar:SetShown(range > 0)
+        if range > 0 then
+            local height = track * viewport / (viewport + range)
+            thumb:SetHeight(math.min(track, math.max(18, height)))
+        end
+    end
+    scroll:HookScript('OnScrollRangeChanged', resize)
+    scroll:HookScript('OnSizeChanged', resize)
+    scroll:HookScript('OnShow', resize)
+    bar:HookScript('OnSizeChanged', resize)
+    resize()
+end
 local registry = RaynnaModsSettingsRegistry
 local groups = {
     'General',
@@ -72,6 +97,7 @@ function A.RegisterSettings()
         local body = CreateFrame('Frame', nil, scroll)
         body:SetSize(405, 1)
         scroll:SetScrollChild(body)
+        A.SizeScrollThumb(scroll)
         local empty = label(body, 'No matching settings', 6)
         empty:ClearAllPoints()
         empty:SetPoint('TOPLEFT', 6, -8)
@@ -88,6 +114,32 @@ function A.RegisterSettings()
         example:SetBackdropColor(0.065, 0.047, 0.032, 0.85)
         example:SetBackdropBorderColor(0.57, 0.43, 0.23, 0.9)
         example:SetClipsChildren(true)
+        A.InitPreviewCamera(example)
+        local cameraInput = CreateFrame('Frame', nil, example)
+        cameraInput:SetAllPoints()
+        cameraInput:SetFrameLevel(example:GetFrameLevel() + 40)
+        cameraInput:EnableMouse(true)
+        cameraInput:EnableMouseWheel(true)
+        cameraInput:SetScript('OnMouseWheel', function(_, delta)
+            example:ZoomCamera(delta)
+        end)
+        cameraInput:RegisterForDrag('LeftButton')
+        cameraInput:SetScript('OnDragStart', function(self)
+            local startX, startY = GetCursorPosition()
+            local x, y = example.cameraX, example.cameraY
+            self:SetScript('OnUpdate', function()
+                local mx, my = GetCursorPosition()
+                local scale = example:GetEffectiveScale()
+                example.cameraX = x + (mx - startX) / scale
+                example.cameraY = y + (my - startY) / scale
+                example:PositionCamera()
+            end)
+        end)
+        local function stopPan(self)
+            self:SetScript('OnUpdate', nil)
+        end
+        cameraInput:SetScript('OnDragStop', stopPan)
+        cameraInput:SetScript('OnHide', stopPan)
         local selector = CreateFrame('Frame', nil, page)
         selector:SetSize(260, 24)
         local friendlyTab, enemyTab
@@ -119,7 +171,7 @@ function A.RegisterSettings()
         resizePreview:SetPoint('TOPRIGHT', -3, -3)
         resizePreview:SetSize(60, 18)
         resizePreview:SetText('Expand')
-        resizePreview:SetFrameLevel(example:GetFrameLevel() + 10)
+        resizePreview:SetFrameLevel(cameraInput:GetFrameLevel() + 1)
         resizePreview:SetScript('OnClick', function()
             expanded = not expanded
             resizePreview:SetText(expanded and 'Compact' or 'Expand')
@@ -136,6 +188,7 @@ function A.RegisterSettings()
         example:SetScript('OnShow', function()
             A.DrawAuraExample(example)
         end)
+        local orderedRows, sectionHeaders = {}, {}
         local function layout()
             example.category = current
             if example:IsVisible() then
@@ -152,12 +205,38 @@ function A.RegisterSettings()
                 selected = A.db.previewEnemyPlayer and 'Enemy players' or 'Friendly players'
             end
             local count, height = 0, 0
-            for _, r in ipairs(rows) do
+            for _, header in ipairs(sectionHeaders) do
+                header:Hide()
+            end
+            local previousSection, previousGroup
+            local headerCount = 0
+            for _, r in ipairs(orderedRows) do
                 local visible = query == ''
                         and (r.group == selected or (selected == 'Colours' and r.castColour) or (selected == 'Friendly players' and r.group == 'Party'))
                     or query ~= '' and r.terms:find(query, 1, true)
                 r:SetShown(not not visible)
                 if visible then
+                    if r.section ~= previousSection or r.group ~= previousGroup then
+                        previousSection, previousGroup = r.section, r.group
+                        headerCount = headerCount + 1
+                        local header = sectionHeaders[headerCount]
+                        if not header then
+                            header = CreateFrame('Frame', nil, body)
+                            header:SetSize(405, 20)
+                            header.title = label(header, '', 4)
+                            local rule = header:CreateTexture(nil, 'ARTWORK')
+                            rule:SetColorTexture(0.55, 0.40, 0.19, 0.65)
+                            rule:SetPoint('LEFT', header.title, 'RIGHT', 8, 0)
+                            rule:SetPoint('RIGHT', -5, 0)
+                            rule:SetHeight(1)
+                            sectionHeaders[headerCount] = header
+                        end
+                        height = height + (count > 0 and 5 or 0)
+                        header.title:SetText(query ~= '' and (r.group .. ' / ' .. r.section) or r.section)
+                        header:SetPoint('TOPLEFT', 0, -height)
+                        header:Show()
+                        height = height + 20
+                    end
                     r:ClearAllPoints()
                     r:SetPoint('TOPLEFT', 0, -height)
                     count = count + 1
@@ -349,9 +428,9 @@ function A.RegisterSettings()
             objectLabel = 'nameText',
             petName = 'nameText showCompanionText',
             petOwner = 'serviceText showCompanionText',
-            buffPosition = 'buffPosition auraText auraScale auraSweep auraSweepStyle auraPulse castableBuffs',
-            debuffPosition = 'debuffPosition auraText auraScale auraSweep auraSweepStyle auraPulse',
-            controlPosition = 'controlPosition auraText auraScale auraSweep auraSweepStyle auraPulse',
+            buffPosition = 'buffPosition buffBorderWidth buffBorderColor auraText auraScale auraSweep auraSweepStyle auraPulse castableBuffs',
+            debuffPosition = 'debuffPosition debuffBorderWidth debuffBorderColor auraText auraScale auraSweep auraSweepStyle auraPulse',
+            controlPosition = 'controlPosition controlBorderWidth controlBorderColor auraText auraScale auraSweep auraSweepStyle auraPulse',
         }
         local playerKeys = {
             name = 'showSurname',
@@ -482,11 +561,13 @@ function A.RegisterSettings()
                 A.db[key] = value
             end
             A.db.personalSetupPending = false
+            A.SyncOptions()
             A.PositionLauncher()
             A.ApplyNativeDistance(A.db.viewDistance)
             A.previewColor = nil
             A.db.showResetReceipt = true
-            ReloadUI()
+            local reload = C_UI and C_UI.Reload or ReloadUI
+            reload()
         end)
         page:HookScript('OnHide', function()
             dismissReset()
@@ -801,8 +882,29 @@ function A.RegisterSettings()
             end
         end
         placement('buffPosition', 'Helpful buff position')
+        number('Auras', 'buffBorderWidth', 'Buff border (0 = off)', 0, 5, 1, ' px', 'thickness hide outline')
         placement('debuffPosition', 'Harmful debuff position')
+        number(
+            'Auras',
+            'debuffBorderWidth',
+            'Debuff border (0 = off)',
+            0,
+            5,
+            1,
+            ' px',
+            'thickness hide outline'
+        )
         placement('controlPosition', 'Crowd control position')
+        number(
+            'Auras',
+            'controlBorderWidth',
+            'Crowd control border (0 = off)',
+            0,
+            5,
+            1,
+            ' px',
+            'thickness hide outline'
+        )
         A.RefreshAuraExample = function()
             if example:IsVisible() then
                 A.DrawAuraExample(example)
@@ -810,6 +912,9 @@ function A.RegisterSettings()
         end
 
         for _, option in ipairs({
+            { 'buffBorderColor', 'Buff border colour' },
+            { 'debuffBorderColor', 'Debuff border colour' },
+            { 'controlBorderColor', 'Crowd control border colour' },
             { 'partyColor', 'Party member colour' },
             { 'targetColor', 'Target highlight colour' },
             { 'quest', 'Quest objective colour' },
@@ -825,7 +930,8 @@ function A.RegisterSettings()
         }) do
             local key, title = option[1], option[2]
             local r = row(
-                key == 'partyColor' and 'Party'
+                key:match('BorderColor$') and 'Auras'
+                    or key == 'partyColor' and 'Party'
                     or key == 'targetColor' and 'Targeting'
                     or (key == 'castColor' or key == 'lockedCastColor') and 'Castbar'
                     or 'Colours',
@@ -847,7 +953,8 @@ function A.RegisterSettings()
             local function set(hex)
                 A.db[key] = hex
                 A.previewLockedCast = key == 'lockedCastColor'
-                A.previewColor = key ~= 'lockedCastColor'
+                A.previewColor = not key:match('BorderColor$')
+                        and key ~= 'lockedCastColor'
                         and key ~= 'partyColor'
                         and key ~= 'targetColor'
                         and key ~= 'castColor'
@@ -917,6 +1024,86 @@ function A.RegisterSettings()
                     picker:Raise()
                 end
             end)
+        end
+        local byGroup = {}
+        for _, r in ipairs(rows) do
+            byGroup[r.group] = byGroup[r.group] or {}
+            byGroup[r.group][r.settingKey or r.resetTitle] = r
+        end
+        local function section(group, title, keys)
+            for key in keys:gmatch('[^|]+') do
+                local r = byGroup[group] and byGroup[group][key]
+                if r then
+                    r.section = title
+                    r.terms = r.terms .. ' ' .. title:lower()
+                    orderedRows[#orderedRows + 1] = r
+                end
+            end
+        end
+        section('General', 'Distance', 'viewDistance|showDistance')
+        section('General', 'Previews', 'preview|previewTarget|previewFriendlyNPC')
+        section('General', 'Shortcuts', 'minimap|Advanced Plater settings')
+        section('Personal', 'Plate and position', 'personal|scale|unlock|Center my plate|native')
+        section('Personal', 'Character details', 'personalName|personalLevel|personalBadge|hideName')
+        section('Personal', 'Guild', 'personalGuild|hideGuild')
+        section('Personal', 'Health and casting', 'personalHealth|personalCasts')
+        section(
+            'Personal',
+            'Resources',
+            'personalPower|personalPowerHeight|personalPowerValue|personalPowerFormat'
+        )
+        section('Personal', 'Auras', 'personalBuffs|personalDebuffs')
+        section('NPCs', 'Plate size', 'friendlyNPCScale|enemyNPCScale')
+        section('NPCs', 'Friendly NPCs', 'townPlates|hideIdleNPCs|compactFriendly')
+        section('NPCs', 'Pets and minions', 'compactCompanions|showCompanionText')
+        for _, group in ipairs({ 'Friendly players', 'Enemy players' }) do
+            local function playerSection(title, keys)
+                local mapped = {}
+                for key in keys:gmatch('%S+') do
+                    mapped[#mapped + 1] = A.PlayerOptionKey(key, group == 'Enemy players')
+                end
+                section(group, title, table.concat(mapped, '|'))
+            end
+            section(
+                group,
+                'Plate size',
+                group == 'Enemy players' and 'enemyPlayerScale' or 'friendlyPlayerScale'
+            )
+            playerSection('Player name', 'showSurname')
+            playerSection('Guild', 'showGuild guildPosition guildStyle')
+            playerSection('Class icon', 'badges spec iconSize')
+            playerSection('Resources', 'power powerHeight powerValue powerFormat')
+        end
+        section('Party', 'Party markers', 'partyIncludeRaid|partyIcon|partyIconStyle|partyIconSize')
+        section('Party', 'Party label', 'partyLabel|partyLabelText|partyTextSize')
+        section('Party', 'Party colours', 'partyHealthTint|partyNameTint|partyColor')
+        section(
+            'Targeting',
+            'Selected target',
+            'targetScale|targetOutline|targetGlowStyle|targetGlowSpread|targetGlowStrength|targetColor'
+        )
+        section('Targeting', 'Threat', 'showThreat|threatPosition')
+        section('Quests', 'Quest objectives', 'questIcon|questTint')
+        section('Auras', 'Icons and timers', 'auraScale|auraSweep|auraSweepStyle|auraPulse')
+        section('Auras', 'Helpful buffs', 'buffs|castableBuffs|buffPosition|buffBorderWidth|buffBorderColor')
+        section('Auras', 'Harmful debuffs', 'debuffs|debuffPosition|debuffBorderWidth|debuffBorderColor')
+        section('Auras', 'Crowd control', 'controlPosition|controlBorderWidth|controlBorderColor')
+        section('Castbar', 'Casts and channels', 'casts|castTimer|castHeight')
+        section('Colours', 'Unit reaction', 'friendly|neutral|hostile')
+        section('Colours', 'Threat', 'safe|pulling|aggro|partyAggro')
+        section('Colours', 'Quest objectives', 'quest')
+        section('Castbar', 'Cast colours', 'castColor|lockedCastColor')
+        section('Text', 'Font and appearance', 'plateFont|textScale|textOutline|textShadow')
+        section('Text', 'Names and guilds', 'nameText|wrapNames|nameWrapWidth|guildText')
+        section('Text', 'Health values', 'showHealthText|healthFormat|hideFullHealthText|healthText')
+        section('Text', 'Level and distance', 'showLevelText|levelText|distanceText')
+        section('Text', 'Casts, auras and services', 'castText|auraText|serviceText')
+        section('Designer', 'Layout editor', 'Open layout designer')
+        for _, r in ipairs(rows) do
+            if not r.section then
+                r.section = 'Other settings'
+                orderedRows[#orderedRows + 1] = r
+            end
         end
         search:SetScript('OnTextChanged', layout)
         search:SetScript('OnEscapePressed', function()

@@ -29,6 +29,7 @@ local parts = {
     { 'debuffPosition', 'Debuffs' },
     { 'controlPosition', 'Crowd control' },
 }
+A.designerParts = parts
 local states = setmetatable({}, { __mode = 'k' })
 local renderingDraft
 function A.MergeDesignerProfiles(db)
@@ -88,11 +89,13 @@ function A.DesignerVisibility(region, opt)
     if not region then
         return
     end
-    if opt and (opt.hidden or opt.opacity) then
+    local faded = region.designerDisabled
+        or (region.designerSample and opt and (opt.hidden or opt.opacity == 0))
+    if faded or (opt and (opt.hidden or opt.opacity)) then
         if region.rnpOriginalAlpha == nil then
             region.rnpOriginalAlpha = region:GetAlpha()
         end
-        region:SetAlpha(opt.hidden and 0 or (opt.opacity or 100) / 100)
+        region:SetAlpha(faded and 0.35 or opt.hidden and 0 or (opt.opacity or 100) / 100)
     elseif region.rnpOriginalAlpha ~= nil then
         region:SetAlpha(region.rnpOriginalAlpha)
         region.rnpOriginalAlpha = nil
@@ -307,7 +310,15 @@ local function transform(region, key, owners, frame)
     end
 end
 function A.DesignPlate(frame)
-    if not A.db or (not renderingDraft and not A.DesignLayout(frame) and not frame.wasDesigned) then
+    if
+        not A.db
+        or (
+            not frame.designerSettings
+            and not renderingDraft
+            and not A.DesignLayout(frame)
+            and not frame.wasDesigned
+        )
+    then
         return
     end
     local owners = frame.designerOwners or {}
@@ -315,6 +326,10 @@ function A.DesignPlate(frame)
     for _, part in ipairs(parts) do
         local region = frame[part[1]]
         if region then
+            if frame.designerSettings then
+                region.designerSample = true
+                region.designerDisabled = frame.designerDisabled[part[1]]
+            end
             owners[region] = part[1]
         end
     end
@@ -324,12 +339,50 @@ function A.DesignPlate(frame)
     transform(frame.auraAnchor, 'auraAnchor', owners, frame)
     A.DesignerVisibility(frame.healthBackground, options('health', frame))
     for _, icon in ipairs(frame.icons or {}) do
+        if frame.designerSettings then
+            icon.designerSample = true
+            icon.designerDisabled = frame.designerDisabled[icon.designKey]
+        end
         A.DesignerVisibility(icon, icon.designKey and options(icon.designKey, frame))
     end
     frame.wasDesigned = renderingDraft ~= nil or A.DesignLayout(frame) ~= nil
 end
+function A.DesignDistance(frame)
+    transform(frame.distance, 'distance', frame.designerOwners, frame)
+end
 function A.DesignThreat(frame)
     transform(frame.threat, 'threat', frame.designerOwners, frame)
+end
+
+function A.InitPreviewCamera(sample)
+    sample.cameraZoom = 1
+    sample.cameraX, sample.cameraY = 0, 0
+    function sample:PositionCamera()
+        local plate = self.sample
+        if not plate or not self.designBaseScale then
+            return
+        end
+        local scale = self.designBaseScale * self.cameraZoom
+        plate:SetScale(scale)
+        plate:ClearAllPoints()
+        plate:SetPoint('CENTER', self, 'CENTER', self.cameraX / scale, self.cameraY / scale)
+    end
+    function sample:ZoomCamera(delta)
+        local old = self.cameraZoom
+        local zoom = math.max(0.4, math.min(4, old * 1.2 ^ delta))
+        local mx, my = GetCursorPosition()
+        local cx, cy = self:GetCenter()
+        if not cx or not cy then
+            return old
+        end
+        local k = self:GetEffectiveScale()
+        mx, my = mx / k - cx, my / k - cy
+        self.cameraX = mx + (self.cameraX - mx) * zoom / old
+        self.cameraY = my + (self.cameraY - my) * zoom / old
+        self.cameraZoom = zoom
+        self:PositionCamera()
+        return zoom
+    end
 end
 
 function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
@@ -410,13 +463,16 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
     toolbar:SetHeight(30)
     local canvas = CreateFrame('Frame', nil, window)
     canvas:SetPoint('TOPLEFT', 12, -70)
-    canvas:SetPoint('BOTTOMRIGHT', -252, 115)
-    local guide = window:CreateFontString(nil, 'ARTWORK', 'GameFontHighlightSmall')
-    guide:SetPoint('TOPLEFT', canvas, 'BOTTOMLEFT', 0, -2)
-    guide:SetPoint('TOPRIGHT', canvas, 'BOTTOMRIGHT', 0, -2)
+    canvas:SetPoint('BOTTOMRIGHT', -252, 172)
+    local guide = window:CreateFontString(nil, 'ARTWORK', 'GameFontHighlight')
+    guide:SetPoint('TOPLEFT', canvas, 'BOTTOMLEFT', 2, -6)
+    guide:SetWidth(math.min(690, maxW - 30))
     guide:SetJustifyH('LEFT')
+    if guide.SetSpacing then
+        guide:SetSpacing(3)
+    end
     guide:SetText(
-        'Drag any selected part to move the selection. Right-drag a part left or right to resize it.\nOn empty space: left-drag to select, right-drag to pan. Shift-drag to select anywhere. Scroll to zoom.'
+        '|cffffd477Component controls|r\n* Left-click to select. Left-drag to move the selection.\n* Right-click a selected part to reset positions. Right-drag a part to resize it.\n* Drag from empty space to box-select, or Shift-drag anywhere. Click empty space to clear.\n* Right-drag empty space to pan. Scroll to zoom. Faded parts are disabled.'
     )
     local footer = CreateFrame('Frame', nil, window)
     footer:SetPoint('BOTTOMLEFT', 12, 3)
@@ -468,7 +524,6 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
         idle = { 'hideIdleNPCs', 'Name only' },
         friendlyPlayerScale = { 'showGuild', 'Show guild' },
         enemyPlayerScale = { 'enemyShowGuild', 'Show guild' },
-        npc = { 'showThreat', 'Show threat' },
     }
     local function syncGeneral()
         local entry = A.designerModes[mode]
@@ -611,6 +666,8 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
             end
             dismiss()
             receipt:SetText('')
+            partPicker:Hide()
+            pickerSelection = nil
             mode = index
             marked = {}
             collapsed = false
@@ -638,12 +695,13 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
     end
     partPicker = CreateFrame('Frame', nil, window, 'BackdropTemplate')
     partPicker:SetPoint('TOPLEFT', selectButton, 'BOTTOMLEFT', 0, -2)
-    partPicker:SetSize(352, math.ceil(#parts / 2) * 25 + 6)
+    partPicker:SetWidth(352)
     partPicker:SetFrameLevel(window:GetFrameLevel() + 70)
     partPicker:SetBackdrop({ bgFile = 'Interface\\Buttons\\WHITE8X8' })
     partPicker:SetBackdropColor(0.09, 0.065, 0.04, 1)
     partPicker:EnableMouse(true)
     partPicker:Hide()
+    local componentButtons = {}
     for index, part in ipairs(parts) do
         local entry = button(partPicker, part[2], 0, 170, function()
             marked = {}
@@ -656,9 +714,32 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
             syncProperties()
             inspector:Show()
         end)
-        entry:ClearAllPoints()
-        entry:SetPoint('TOPLEFT', 4 + ((index - 1) % 2) * 174, -3 - math.floor((index - 1) / 2) * 25)
+        componentButtons[index] = entry
     end
+    partPicker:SetScript('OnShow', function()
+        local frame = sample.sample
+        local visible = {}
+        if frame then
+            for _, icon in ipairs(frame.icons or {}) do
+                if icon.designKey and icon:IsVisible() then
+                    visible[icon.designKey] = true
+                end
+            end
+        end
+        local count = 0
+        for i, part in ipairs(parts) do
+            local entry = componentButtons[i]
+            local region = frame and frame[part[1]]
+            local shown = visible[part[1]] or (region and region:IsVisible())
+            entry:SetShown(not not shown)
+            if shown then
+                entry:ClearAllPoints()
+                entry:SetPoint('TOPLEFT', 4 + (count % 2) * 174, -3 - math.floor(count / 2) * 25)
+                count = count + 1
+            end
+        end
+        partPicker:SetHeight(math.ceil(count / 2) * 25 + 6)
+    end)
     window:HookScript('OnHide', function()
         partPicker:Hide()
     end)
@@ -688,6 +769,7 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
     local sections = CreateFrame('Frame', nil, viewport)
     sections:SetSize(210, 410)
     viewport:SetScrollChild(sections)
+    A.SizeScrollThumb(viewport)
     inspector:SetWidth(240)
     local panels, headers = {}, {}
     local function buildPanel(selected)
@@ -735,7 +817,10 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
             for field, control in pairs(propertyFields) do
                 control:SetText(opt[field] or (field == 'scale' and 1 or field == 'opacity' and 100 or 0))
             end
-            visibleCheck:SetChecked(not opt.hidden)
+            visibleCheck:SetChecked(
+                not opt.hidden
+                    and not (sample.sample.designerDisabled and sample.sample.designerDisabled[key])
+            )
             alignButton:SetText(opt.align or 'Default alignment')
             outlineButton:SetText(opt.outline == '' and 'No outline' or opt.outline or 'Default outline')
             alignButton:GetParent():SetShown(target and target.GetFont ~= nil or false)
@@ -873,7 +958,16 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
         visibleCheck:SetPoint('LEFT')
         visibleCheck.Text:SetText('Show component')
         visibleCheck:SetScript('OnClick', function()
-            property('hidden', not visibleCheck:GetChecked())
+            local enabled = not not visibleCheck:GetChecked()
+            local f = sample.sample
+            local setting = f.designerSettings and f.designerSettings[parts[selected][1]]
+            if setting and enabled then
+                A.db[setting] = true
+            end
+            property('hidden', not enabled)
+            if setting and A.SyncOptions then
+                A.SyncOptions()
+            end
         end)
         local function numeric(field, title, y, minimum, maximum, step)
             local r = propertyRow(y)
@@ -1011,7 +1105,7 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
         local scale = 0.82
         host:SetScale(scale)
         inspector:SetWidth(370)
-        canvas:SetPoint('BOTTOMRIGHT', -391, 115)
+        canvas:SetPoint('BOTTOMRIGHT', -391, 172)
         local last
         syncShared = function(top)
             if not top then
@@ -1048,32 +1142,38 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
     local outlines = {}
     updateSelection = function()
         local f = sample.sample
-        for i, part in ipairs(parts) do
-            local region = f and f[part[1]]
-            if f and not region and (marked[i] or selected == i) then
-                for _, icon in ipairs(f.icons or {}) do
-                    if icon.designKey == part[1] and icon:IsShown() then
-                        region = icon
-                        break
+        local count = 0
+        local function highlight(region)
+            if not region or not region:IsShown() then
+                return
+            end
+            count = count + 1
+            local outline = outlines[count]
+            if not outline then
+                outline = CreateFrame('Frame', nil, surface, 'BackdropTemplate')
+                outline:SetBackdrop({ edgeFile = 'Interface\\Buttons\\WHITE8X8', edgeSize = 1 })
+                outline:SetBackdropBorderColor(1, 0.82, 0.18, 1)
+                outline:EnableMouse(false)
+                outlines[count] = outline
+            end
+            outline:ClearAllPoints()
+            outline:SetAllPoints(region)
+            outline:Show()
+        end
+        if f and not cleared then
+            for i, part in ipairs(parts) do
+                if i == selected or marked[i] then
+                    highlight(f[part[1]])
+                    for _, icon in ipairs(f.icons or {}) do
+                        if icon.designKey == part[1] then
+                            highlight(icon)
+                        end
                     end
                 end
             end
-            local outline = outlines[i]
-            if not cleared and (i == selected or marked[i]) and region and region:IsShown() then
-                if not outline then
-                    outline = CreateFrame('Frame', nil, surface, 'BackdropTemplate')
-                    outline:SetBackdrop({ edgeFile = 'Interface\\Buttons\\WHITE8X8', edgeSize = 1 })
-                    outline:SetBackdropBorderColor(1, 0.82, 0.18, 1)
-                    outline:EnableMouse(false)
-                    outlines[i] = outline
-                end
-                outline:ClearAllPoints()
-                outline:SetPoint('TOPLEFT', region, 'TOPLEFT', -2, 2)
-                outline:SetPoint('BOTTOMRIGHT', region, 'BOTTOMRIGHT', 2, -2)
-                outline:Show()
-            elseif outline then
-                outline:Hide()
-            end
+        end
+        for i = count + 1, #outlines do
+            outlines[i]:Hide()
         end
     end
     window:EnableKeyboard(true)
@@ -1172,6 +1272,31 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
             return dx, dy
         end
         local bestX, bestY
+        if d.auraRows[d.key] then
+            local nearest
+            for _, part in ipairs(parts) do
+                local key = part[1]
+                local target = d.auraRows[key]
+                if target and not d.moving[key] then
+                    local leftGap = target[1] - r[3] - dx
+                    local rightGap = target[3] - r[1] - dx
+                    local edge = math.abs(leftGap) < math.abs(rightGap) and leftGap or rightGap
+                    local top = target[4] - r[4] - dy
+                    local reach = math.min(r[4] - r[2], target[4] - target[2]) + 3
+                    local score = math.abs(edge) + math.abs(top)
+                    if
+                        math.abs(edge) <= 6
+                        and math.abs(top) <= math.max(8, reach)
+                        and (not nearest or score < nearest.score)
+                    then
+                        nearest = { edge = edge, top = top, score = score }
+                    end
+                end
+            end
+            if nearest then
+                return dx + nearest.edge, dy + nearest.top, true
+            end
+        end
         for _, t in ipairs(d.targets) do
             local gx = math.max(0, t[1] - r[3] - dx, r[1] + dx - t[3])
             local gy = math.max(0, t[2] - r[4] - dy, r[2] + dy - t[4])
@@ -1196,7 +1321,7 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
         return { math.min(a[1], b[1]), math.min(a[2], b[2]), math.max(a[3], b[3]), math.max(a[4], b[4]) }
     end
     local function overlaps(a, b)
-        return a[1] < b[3] and a[3] > b[1] and a[2] < b[4] and a[4] > b[2]
+        return a[1] < b[3] - 0.001 and a[3] > b[1] + 0.001 and a[2] < b[4] - 0.001 and a[4] > b[2] + 0.001
     end
     -- Place neighbours against the dragged group first, then against each
     -- displaced group. Unaffected parts keep their mouse-down positions.
@@ -1214,7 +1339,7 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
             for field, value in pairs(base) do
                 draft[key][field] = value
             end
-            draft[key].x, draft[key].y = base.x + x / units, base.y + y / units
+            draft[key].x, draft[key].y = base.x + x / units, base.y + (d.clearance[key] or 0) + y / units
         end
         for _, key in ipairs(moving.members) do
             if key ~= d.key then
@@ -1233,25 +1358,40 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
                 if group and not placed[key] and overlaps(group.rect, obstacle) then
                     local box = group.rect
                     local best
-                    for _, other in ipairs(fixed) do
-                        for _, delta in ipairs({
-                            { other[1] - box[3] - 2, 0 },
-                            { other[3] - box[1] + 2, 0 },
-                            { 0, other[2] - box[4] - 2 },
-                            { 0, other[4] - box[2] + 2 },
-                        }) do
-                            local x, y = delta[1], delta[2]
-                            local rect = { box[1] + x, box[2] + y, box[3] + x, box[4] + y }
-                            local clear = true
-                            for _, occupied in ipairs(fixed) do
-                                if overlaps(rect, occupied) then
-                                    clear = false
-                                    break
-                                end
-                            end
+                    -- Test the proposed destination against stationary groups too.
+                    -- Include their edges as candidates so tight but usable gaps win.
+                    local obstacles = {}
+                    for _, rect in ipairs(fixed) do
+                        obstacles[#obstacles + 1] = rect
+                    end
+                    for _, partInfo in ipairs(parts) do
+                        local id = partInfo[1]
+                        if id ~= key and not placed[id] and d.groups[id] then
+                            obstacles[#obstacles + 1] = d.groups[id].rect
+                        end
+                    end
+                    local xs, ys = { 0 }, { 0 }
+                    for _, rect in ipairs(obstacles) do
+                        xs[#xs + 1] = rect[1] - box[3]
+                        xs[#xs + 1] = rect[3] - box[1]
+                        ys[#ys + 1] = rect[2] - box[4]
+                        ys[#ys + 1] = rect[4] - box[2]
+                    end
+                    for _, x in ipairs(xs) do
+                        for _, y in ipairs(ys) do
                             local distance = math.abs(x) + math.abs(y)
-                            if clear and (not best or distance < best.distance) then
-                                best = { x = x, y = y, rect = rect, distance = distance }
+                            if not best or distance < best.distance then
+                                local rect = { box[1] + x, box[2] + y, box[3] + x, box[4] + y }
+                                local clear = true
+                                for _, other in ipairs(obstacles) do
+                                    if overlaps(rect, other) then
+                                        clear = false
+                                        break
+                                    end
+                                end
+                                if clear then
+                                    best = { x = x, y = y, rect = rect, distance = distance }
+                                end
                             end
                         end
                     end
@@ -1325,18 +1465,7 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
         end
         sync()
     end
-    sample.cameraZoom = 1
-    sample.cameraX, sample.cameraY = 0, 0
-    function sample:PositionCamera()
-        local plate = self.sample
-        if not plate or not self.designBaseScale then
-            return
-        end
-        local scale = self.designBaseScale * self.cameraZoom
-        plate:SetScale(scale)
-        plate:ClearAllPoints()
-        plate:SetPoint('CENTER', self, 'CENTER', self.cameraX / scale, self.cameraY / scale)
-    end
+    A.InitPreviewCamera(sample)
     local cameraText = label(footer, '100%', 205)
     button(footer, 'Centre view', 259, 103, function()
         sample.cameraX, sample.cameraY, sample.cameraZoom = 0, 0, 1
@@ -1348,17 +1477,8 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
         if drag or pan or box then
             return
         end
-        local old = sample.cameraZoom
-        local zoom = math.max(0.4, math.min(4, old * 1.2 ^ delta))
-        local mx, my = GetCursorPosition()
-        local cx, cy = sample:GetCenter()
-        local k = sample:GetEffectiveScale()
-        mx, my = mx / k - cx, my / k - cy
-        sample.cameraX = mx + (sample.cameraX - mx) * zoom / old
-        sample.cameraY = my + (sample.cameraY - my) * zoom / old
-        sample.cameraZoom = zoom
+        local zoom = sample:ZoomCamera(delta)
         cameraText:SetText(('%d%%'):format(math.floor(zoom * 100 + 0.5)))
-        sample:PositionCamera()
     end)
     surface:SetScript('OnMouseDown', function(_, mouse)
         if mouse ~= 'LeftButton' and mouse ~= 'RightButton' then
@@ -1412,13 +1532,19 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
                 moving[parts[index][1]] = true
             end
         end
+        drag.auraRows = {}
         drag.moving = moving
+        drag.clearance = {}
         local function addBounds(r, k)
             local b = bounds(r)
             if not b then
                 return
             end
+            drag.clearance[k] = r.rnpClearanceY or 0
             drag.unitsByKey[k] = r:GetParent():GetEffectiveScale()
+            if r.designKey then
+                drag.auraRows[k] = union(drag.auraRows[k], b)
+            end
             if not moving[k] then
                 table.insert(drag.targets, b)
             else
@@ -1467,6 +1593,34 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
             return
         end
         local draft = drag.draft
+        if commit and drag.mouse == 'RightButton' and not drag.started then
+            local mx, my = GetCursorPosition()
+            if (mx - drag.cx) ^ 2 + (my - drag.cy) ^ 2 < 64 then
+                for index, part in ipairs(parts) do
+                    local key = part[1]
+                    local original = drag.base[key]
+                    if
+                        (index == selected or marked[index])
+                        and original
+                        and ((original.x or 0) ~= 0 or (original.y or 0) ~= 0)
+                    then
+                        if not draft then
+                            draft = {}
+                            for k, v in pairs(drag.base) do
+                                draft[k] = v
+                            end
+                        end
+                        local reset = {}
+                        for k, v in pairs(original) do
+                            reset[k] = v
+                        end
+                        reset.x, reset.y = 0, 0
+                        draft[key] = reset
+                    end
+                end
+            end
+        end
+        sample.sample.designerMoving = nil
         drag = nil
         sample.designerDragging = nil
         if commit then
@@ -1515,8 +1669,9 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
             end
             drag.started = true
         end
+        local edgeSnapped
         if drag.mouse == 'LeftButton' then
-            dx, dy = snap(drag, dx, dy)
+            dx, dy, edgeSnapped = snap(drag, dx, dy)
         end
         dx, dy = dx / factor, dy / factor
         local function round(n)
@@ -1527,7 +1682,11 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
         if drag.mouse == 'RightButton' then
             s = math.max(0.25, math.min(3, round(s * 100 + dx) / 100))
         else
-            x, y = round(x + dx), round(y + dy)
+            if edgeSnapped then
+                x, y = x + dx, y + dy
+            else
+                x, y = round(x + dx), round(y + dy)
+            end
         end
         if drag.lastX == x and drag.lastY == y and drag.lastScale == s then
             return
@@ -1555,30 +1714,27 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
                 end
                 local ratio = factor / drag.unitsByKey[k]
                 moved.x = (base.x or 0) + (x - drag.x) * ratio
-                moved.y = (base.y or 0) + (y - drag.y) * ratio
+                moved.y = (base.y or 0) + (drag.clearance[k] or 0) + (y - drag.y) * ratio
                 draft[k] = moved
             end
+        end
+        if drag.mouse == 'LeftButton' then
+            sample.sample.designerMoving = drag.moving
+            draft[drag.key].y = y + (drag.clearance[drag.key] or 0)
         end
         drag.draft = draft
         renderingDraft = draft
         A.DesignPlate(sample.sample)
-        renderingDraft = nil
-        local origins = {}
         for _, saved in ipairs(drag.icons) do
-            local base = drag.base[saved.key] or { x = 0, y = 0, scale = 1 }
+            local base = drag.base[saved.key] or { scale = 1 }
             local now = draft[saved.key] or base
             local ratio = now.scale / base.scale
-            local origin = origins[saved.key] or saved.x
-            origins[saved.key] = origin
             saved.icon:SetSize(saved.width * ratio, saved.height * ratio)
-            saved.icon:SetPoint(
-                saved.point,
-                saved.parent,
-                saved.anchor,
-                saved.x + now.x - base.x + (saved.x - origin) * (ratio - 1),
-                saved.y + now.y - base.y
-            )
         end
+        if A.RefreshDesignerTimers then
+            A.RefreshDesignerTimers(sample.sample)
+        end
+        renderingDraft = nil
         readout:SetText(('%+.0f, %+.0f   %d%%'):format(x, y, math.floor(s * 100 + 0.5)))
     end)
     surface:SetScript('OnMouseUp', function()

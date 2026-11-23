@@ -205,19 +205,11 @@ local function friendlyPlayer(unit)
     return not UnitCanAttack('player', unit) and UnitIsFriend('player', unit)
 end
 local threatStates = { [0] = 'Low threat', [1] = 'Gaining aggro', [2] = 'Losing lead', [3] = 'Holding aggro' }
-local function positionThreat(f)
-    local label = f.threat
-    if not label or not label:IsShown() then
+local function clearLabel(f, label, distance, timerSlots)
+    label.rnpClearanceY = 0
+    local moving = f.designerMoving and f.designerMoving[distance and 'distance' or 'threat']
+    if moving and not (distance and timerSlots) then
         return
-    end
-    local position = A.db.threatPosition
-    label:ClearAllPoints()
-    if position == 'Left of bar' then
-        A.AnchorPart(label, 'RIGHT', f.health, 'LEFT', -5, 0)
-    elseif position == 'Above name' then
-        A.AnchorPart(label, 'BOTTOM', f.name, 'TOP', 0, 2)
-    else
-        A.AnchorPart(label, 'LEFT', f.health, 'RIGHT', 5, 0)
     end
     if label.IsAnchoringRestricted and label:IsAnchoringRestricted() then
         return
@@ -268,13 +260,30 @@ local function positionThreat(f)
             intervals[#intervals + 1] = { y * scale - bottom - height - 2, (y + h) * scale - bottom + 2 }
         end
     end
-    for _, icon in ipairs(f.icons or {}) do
-        avoid(icon)
-        avoid(icon.timer)
+    if not moving then
+        for _, part in ipairs(A.designerParts or {}) do
+            local key = part[1]
+            if key ~= 'threat' and key ~= 'distance' then
+                avoid(f[key])
+            end
+        end
+        if distance then
+            avoid(f.threat)
+        end
+        for _, icon in ipairs(f.icons or {}) do
+            avoid(icon)
+            avoid(icon.timer)
+        end
+        for _, entry in ipairs(f.nativeThreatIcons or {}) do
+            avoid(entry.icon)
+            avoid(entry.timer)
+        end
     end
-    for _, entry in ipairs(f.nativeThreatIcons or {}) do
-        avoid(entry.icon)
-        avoid(entry.timer)
+    for _, box in ipairs(timerSlots or {}) do
+        if box[2] / labelScale > left - 2 and box[1] / labelScale < left + width + 2 then
+            intervals[#intervals + 1] =
+                { box[3] / labelScale - bottom - height - 2, box[4] / labelScale - bottom + 2 }
+        end
     end
     -- Merge blocked vertical offsets so moving past one icon also clears its neighbours.
     table.sort(intervals, function(a, b)
@@ -292,14 +301,43 @@ local function positionThreat(f)
         end
     end
     if low and low < 0 and high > 0 then
-        local delta = high <= -low and high or low
+        local delta = (distance or high <= -low) and high or low
         local ok, point, relative, anchor, x, y = pcall(label.GetPoint, label, 1)
         if not ok or not point or not readable(x) or not readable(y) then
             return
         end
         label:ClearAllPoints()
-        A.AnchorPart(label, point, relative, anchor, x, y + delta)
+        label:SetPoint(point, relative, anchor, x, y + delta)
+        label.rnpClearanceY = delta * label:GetEffectiveScale() / label:GetParent():GetEffectiveScale()
     end
+end
+local function positionThreat(f)
+    local label = f.threat
+    if not label or not label:IsShown() then
+        return
+    end
+    local position = A.db.threatPosition
+    label:ClearAllPoints()
+    if position == 'Left of bar' then
+        A.AnchorPart(label, 'RIGHT', f.health, 'LEFT', -5, 0)
+    elseif position == 'Above name' then
+        A.AnchorPart(label, 'BOTTOM', f.name, 'TOP', 0, 2)
+    else
+        A.AnchorPart(label, 'LEFT', f.health, 'RIGHT', 5, 0)
+    end
+    A.DesignThreat(f)
+    clearLabel(f, label, false)
+end
+local function positionDistance(f, timerSlots)
+    local label = f.distance
+    if not label or not label:IsVisible() then
+        return
+    end
+    -- Start from the configured anchor every time so clearance is temporary.
+    label:ClearAllPoints()
+    A.AnchorPart(label, 'LEFT', f.level, 'RIGHT', 4, 0)
+    A.DesignDistance(f)
+    clearLabel(f, label, true, timerSlots)
 end
 local function showThreat(f, percent, tint)
     if not A.db.showThreat or not readable(percent) or type(percent) ~= 'number' then
@@ -316,7 +354,7 @@ local function showThreat(f, percent, tint)
     label:SetTextColor(color(tint))
     label:Show()
     positionThreat(f)
-    A.DesignThreat(f)
+    positionDistance(f)
 end
 local function mobGUID(unit)
     local guid = UnitGUID(unit)
@@ -779,6 +817,22 @@ local function durationPulse(box, duration)
     return true
 end
 
+local function styleAuraBorder(art, rim, kind)
+    local width = A.db[kind .. 'BorderWidth'] or 2
+    local key = kind .. 'BorderColor'
+    if art.rnpBorderWidth ~= width then
+        art:ClearAllPoints()
+        art:SetPoint('TOPLEFT', width, -width)
+        art:SetPoint('BOTTOMRIGHT', -width, width)
+        rim:SetShown(width > 0)
+        art.rnpBorderWidth = width
+    end
+    if art.rnpBorderColor ~= A.db[key] then
+        rim:SetColorTexture(color(key))
+        art.rnpBorderColor = A.db[key]
+    end
+end
+
 local function createExpiryPulse(box, parent)
     local overlay = CreateFrame('Frame', nil, parent or box)
     overlay:SetAllPoints(box)
@@ -791,11 +845,12 @@ local function createExpiryPulse(box, parent)
     -- stays visible outside the expiry window. Never inspect restricted texture IDs.
     local border = flash:CreateTexture(nil, 'BACKGROUND')
     border:SetAllPoints()
-    border:SetColorTexture(1, 0.76, 0.24, 1)
+    flash.rim = border
     local icon = flash:CreateTexture(nil, 'ARTWORK')
     icon:SetPoint('TOPLEFT', 2, -2)
     icon:SetPoint('BOTTOMRIGHT', -2, 2)
     icon:SetTexCoord(0.07, 0.93, 0.07, 0.93)
+    styleAuraBorder(icon, border, box.designKey:gsub('Position$', ''))
     flash.art = icon
     box.rnpPulseArt = flash
     local function syncIcon()
@@ -968,7 +1023,20 @@ local placementDefaults =
 function A.AuraPosition(key)
     return A.db[key] or placementDefaults[key]
 end
-local function anchorAura(widget, f, position, index, count, size, scale, key)
+local function anchorAura(
+    widget,
+    f,
+    position,
+    index,
+    count,
+    size,
+    scale,
+    key,
+    occupied,
+    offset,
+    span,
+    footprint
+)
     local x = 0
     local y = 0
     local relative = f
@@ -1012,10 +1080,397 @@ local function anchorAura(widget, f, position, index, count, size, scale, key)
             x = x + width - count * size
         end
     end
+    if offset then
+        x = x - index * size + offset
+        if position == 'Middle left' or position:find('right', 1, true) then
+            x = x + count * size - span
+        elseif position:find('middle', 1, true) then
+            x = x + (count * size - span) / 2
+        end
+    end
     local dx, dy = A.DesignerAura(key, f)
     x, y = x + dx, y + dy
+    if occupied then
+        local width = footprint or size
+        local origin = anchor == 'TOPRIGHT' and f:GetWidth() or 0
+        local left = x + origin
+        local height = size
+        for pass = 1, #occupied do
+            local before, previousY = left, y
+            for _, rect in ipairs(occupied) do
+                if
+                    rect.parent == relative
+                    and y > rect.bottom
+                    and y - height < rect.top
+                    and left < rect.right
+                    and left + width > rect.left
+                then
+                    local vertical = math.min(rect.top - (y - height), y - rect.bottom)
+                    local horizontal = math.min(rect.right - left, left + width - rect.left)
+                    if vertical < horizontal and math.abs(dy) > 0.01 then
+                        y = (y - height / 2 < (rect.top + rect.bottom) / 2) and rect.bottom
+                            or rect.top + height
+                    else
+                        local leftEdge = rect.left - width
+                        left = math.abs(leftEdge - left) < math.abs(rect.right - left) and leftEdge
+                            or rect.right
+                    end
+                end
+            end
+            if left == before and y == previousY then
+                break
+            end
+        end
+        -- If resolving a row collision put it into the plate, move the
+        -- whole row outward, checking bars and previously placed rows again.
+        local function geometry(region)
+            if not region or (region.IsAnchoringRestricted and region:IsAnchoringRestricted()) then
+                return
+            end
+            local ok, l, b, w, h = pcall(region.GetRect, region)
+            if
+                not ok
+                or not readable(l)
+                or not readable(b)
+                or not readable(w)
+                or not readable(h)
+                or not (l and b and w and h)
+            then
+                return
+            end
+            local k = region:GetEffectiveScale()
+            return l * k, b * k, (l + w) * k, (b + h) * k, k
+        end
+        local ox, _, _, oy, k = geometry(relative)
+        if ox then
+            local blocks = {}
+            local function add(l, b, r, t)
+                if l and ox + (left + width) * k > l + 0.001 and ox + left * k < r - 0.001 then
+                    blocks[#blocks + 1] = { (b - oy) / k, (t - oy) / k }
+                end
+            end
+            for _, rect in ipairs(occupied) do
+                local rx, _, _, ry, rk = geometry(rect.parent)
+                if rx then
+                    local peerLeft = (rx + rect.left * rk - ox) / k
+                    local peerRight = (rx + rect.right * rk - ox) / k
+                    local peerBottom = (ry + rect.bottom * rk - oy) / k
+                    local peerTop = (ry + rect.top * rk - oy) / k
+                    -- Anchors and saved offsets can round independently. Resolve
+                    -- a grazing side edge horizontally, before testing vertical clearance.
+                    if y > peerBottom and y - height < peerTop then
+                        local intoLeft = left + width - peerLeft
+                        local intoRight = peerRight - left
+                        if intoLeft > 0 and intoLeft <= 1 and intoLeft <= intoRight then
+                            left = peerLeft - width
+                        elseif intoRight > 0 and intoRight <= 1 and intoRight < intoLeft then
+                            left = peerRight
+                        end
+                    end
+                end
+            end
+            -- Gather vertical obstacles only after the horizontal edge is final.
+            for _, barKey in ipairs({ 'health', 'cast', 'power' }) do
+                local bar = f[barKey]
+                if bar and bar:IsShown() and bar:GetAlpha() > 0 then
+                    add(geometry(bar))
+                end
+            end
+            for _, rect in ipairs(occupied) do
+                local rx, _, _, ry, rk = geometry(rect.parent)
+                if rx then
+                    add(rx + rect.left * rk, ry + rect.bottom * rk, rx + rect.right * rk, ry + rect.top * rk)
+                end
+            end
+            local below = position:find('Bottom', 1, true) ~= nil
+            for pass = 1, #blocks do
+                local before = y
+                for _, block in ipairs(blocks) do
+                    if y > block[1] + 0.001 and y - height < block[2] - 0.001 then
+                        y = below and block[1] - 1 or block[2] + height + 1
+                    end
+                end
+                if y == before then
+                    break
+                end
+            end
+        end
+        occupied[#occupied + 1] = {
+            widget = widget,
+            key = key,
+            size = size,
+            parent = relative,
+            left = left,
+            right = left + width,
+            top = y,
+            bottom = y - height,
+        }
+        x = left - origin
+    end
     widget:ClearAllPoints()
     widget:SetPoint('TOPLEFT', relative, anchor, x / scale, y / scale)
+    return relative, anchor, x, y
+end
+-- Pack each type as a contiguous run before applying designer offsets.
+-- Collision resolution moves the entire run, preserving order and spacing.
+local function packAuraRows(f, position, icons, occupied, timers)
+    local groups = {}
+    local total = 0
+    for _, icon in ipairs(icons) do
+        local key = icon.designKey
+        local group = groups[key] or { width = 0 }
+        groups[key] = group
+        group[#group + 1] = icon
+        group.width = group.width + icon:GetWidth()
+        total = total + icon:GetWidth()
+    end
+    local offset = 0
+    for _, key in ipairs({ 'buffPosition', 'debuffPosition', 'controlPosition' }) do
+        local group = groups[key]
+        if group then
+            local first = group[1]
+            local parent, anchor, x, y = anchorAura(
+                first,
+                f,
+                position,
+                0,
+                #icons,
+                first:GetWidth(),
+                1,
+                key,
+                occupied,
+                offset,
+                total,
+                group.width
+            )
+            local rect = occupied[#occupied]
+            local shift = 0
+            for index, icon in ipairs(group) do
+                local size = icon:GetWidth()
+                if index > 1 then
+                    icon:ClearAllPoints()
+                    icon:SetPoint('TOPLEFT', parent, anchor, x + shift, y)
+                end
+                timers[#timers + 1] = {
+                    widget = icon,
+                    key = key,
+                    parent = parent,
+                    size = size,
+                    left = rect.left + shift,
+                    right = rect.left + shift + size,
+                    top = rect.top,
+                    bottom = rect.top - size,
+                }
+                shift = shift + size
+            end
+            offset = offset + group.width
+        end
+    end
+end
+local function placeAuraTimers(rects, f)
+    local slots = {}
+    if #rects == 0 then
+        return
+    end
+    local obstacles = {}
+    local function screenBox(region)
+        if
+            not region
+            or not region.GetRect
+            or not region:IsVisible()
+            or (region.IsAnchoringRestricted and region:IsAnchoringRestricted())
+        then
+            return
+        end
+        local ok, x, y, w, h = pcall(region.GetRect, region)
+        if
+            not ok
+            or not readable(x)
+            or not readable(y)
+            or not readable(w)
+            or not readable(h)
+            or not x
+            or not y
+            or not w
+            or not h
+        then
+            return
+        end
+        local scale = region.GetEffectiveScale and region:GetEffectiveScale()
+            or region:GetParent():GetEffectiveScale()
+        return { x * scale, (x + w) * scale, y * scale, (y + h) * scale }
+    end
+    for _, part in ipairs(A.designerParts or {}) do
+        local box = part[1] ~= 'distance' and screenBox(f[part[1]])
+        if box then
+            obstacles[#obstacles + 1] = box
+        end
+    end
+    local origins = {}
+    for _, r in ipairs(rects) do
+        local origin = screenBox(r.parent)
+        local scale = origin and r.parent:GetEffectiveScale()
+        if origin then
+            local l, b, t, rr = r.left, r.bottom, r.top, r.right
+            origins[r] = { origin[1], origin[4], scale, l, rr, t, b }
+            obstacles[#obstacles + 1] = {
+                origin[1] + l * scale,
+                origin[1] + rr * scale,
+                origin[4] + b * scale,
+                origin[4] + t * scale,
+            }
+        end
+    end
+    local rowPreference = {}
+    local function positionTimer(r, measure)
+        local o = origins[r]
+        local l, rr, t, b = r.left, r.right, r.top, r.bottom
+        if o then
+            l, rr, t, b = o[4], o[5], o[6], o[7]
+        end
+        local height = r.size * 0.65
+        local function screen(left, right, top, bottom)
+            return { o[1] + left * o[3], o[1] + right * o[3], o[2] + bottom * o[3], o[2] + top * o[3] }
+        end
+        local function clear(left, right, top, bottom)
+            if o then
+                local candidate = screen(left, right, top, bottom)
+                for _, box in ipairs(obstacles) do
+                    if
+                        candidate[1] < box[2]
+                        and candidate[2] > box[1]
+                        and candidate[3] < box[4]
+                        and candidate[4] > box[3]
+                    then
+                        return false
+                    end
+                end
+            else
+                for _, other in ipairs(rects) do
+                    if
+                        other ~= r
+                        and other.parent == r.parent
+                        and left < other.right
+                        and right > other.left
+                        and top > other.bottom
+                        and bottom < other.top
+                    then
+                        return false
+                    end
+                end
+            end
+            return true
+        end
+        local from, to, x, y = 'TOP', 'BOTTOM', 0, -1
+        -- The countdown is centred below the artwork and is often just one
+        -- digit. Test its lettering rather than reserving another icon slot.
+        local left, right = l, rr
+        local gap = 1
+        local timer = r.widget.timer
+        if timer and timer.GetStringHeight and timer.GetStringWidth then
+            local h, w = timer:GetStringHeight(), timer:GetStringWidth()
+            if readable(h) and h and h > 0 then
+                height = h
+            end
+            if readable(w) and w and w > 0 then
+                local center = (left + right) / 2
+                left, right = center - w / 2, center + w / 2
+            end
+        end
+        local group = r.key and rowPreference[r.key]
+        if measure then
+            if r.key then
+                group = group or { below = true, above = true }
+                group.below = group.below and clear(left, right, b - gap, b - gap - height)
+                group.above = group.above and clear(left, right, t + 1 + height, t + 1)
+                rowPreference[r.key] = group
+            end
+            return
+        end
+        local preferAbove = group and not group.below and group.above
+        local w = right - left
+        local chosen
+        local function try(anchor, relative, dx, dy, left, bottom)
+            if not clear(left, left + w, bottom + height, bottom) then
+                return false
+            end
+            from, to, x, y = anchor, relative, dx, dy
+            if o then
+                chosen = screen(left, left + w, bottom + height, bottom)
+            end
+            return true
+        end
+        local single = rr - l <= r.size + 0.01
+        if
+            not (preferAbove and try('BOTTOM', 'TOP', 0, 1, left, t + 1))
+            and not try('TOP', 'BOTTOM', 0, -gap, left, b - gap - height)
+            and not try('BOTTOM', 'TOP', 0, 1, left, t + 1)
+            and not (single and try('LEFT', 'BOTTOMRIGHT', 2, height / 2, rr + 2, b))
+            and not (single and try('RIGHT', 'BOTTOMLEFT', -2, height / 2, l - 2 - w, b))
+        then
+            -- Walk below the row if all four neighbouring slots are occupied.
+            local bottom = b - gap - height
+            for step = 1, #obstacles + #rects + 1 do
+                local nextBottom = bottom - height - gap
+                if o then
+                    local box = screen(left, right, bottom + height, bottom)
+                    for _, other in ipairs(obstacles) do
+                        if
+                            box[1] < other[2]
+                            and box[2] > other[1]
+                            and box[3] < other[4]
+                            and box[4] > other[3]
+                        then
+                            nextBottom = math.min(nextBottom, (other[3] - o[2]) / o[3] - height - gap)
+                        end
+                    end
+                end
+                bottom = nextBottom
+                if try('TOP', 'BOTTOM', 0, bottom + height - b, left, bottom) then
+                    break
+                end
+            end
+        end
+        if chosen then
+            obstacles[#obstacles + 1] = chosen
+            if r.widget.timer and r.widget.timer:IsShown() then
+                slots[#slots + 1] = chosen
+            end
+        end
+        local function set(timer, parent)
+            timer:ClearAllPoints()
+            timer:SetPoint(from, parent, to, x, y)
+        end
+        if r.widget.timer then
+            set(r.widget.timer, r.widget)
+        end
+        for _, entry in ipairs(f.nativeThreatIcons or {}) do
+            if entry.container and entry.container.rnpRow == r.widget.rnpRow and r.widget.rnpRow then
+                set(entry.timer, entry.icon)
+            end
+        end
+    end
+    for _, rect in ipairs(rects) do
+        positionTimer(rect, true)
+    end
+    for _, rect in ipairs(rects) do
+        positionTimer(rect, false)
+    end
+    return slots
+end
+function A.RefreshDesignerTimers(f)
+    if f and f.designerPositions then
+        local occupied, timers = {}, {}
+        for _, position in ipairs(A.auraPositions) do
+            local icons = f.designerPositions[position]
+            if icons then
+                packAuraRows(f, position, icons, occupied, timers)
+            end
+        end
+        positionThreat(f)
+        local slots = placeAuraTimers(timers, f)
+        positionDistance(f, slots)
+    end
 end
 local function setLevel(label, level)
     label:SetShown(A.db.showLevelText ~= false)
@@ -1046,11 +1501,17 @@ local function nativeAuras(f, u, enabled)
     local buffFilter = A.db.castableBuffs and 'HELPFUL|PLAYER' or 'HELPFUL'
     local harmfulFilter = 'HARMFUL|!CROWD_CONTROL'
     local controlFilter = 'HARMFUL|CROWD_CONTROL'
-    local rows, placements = {}, {}
+    local rows, placements, order, occupied = {}, {}, {}, {}
     local function addFilter(key, filter)
         local position = A.AuraPosition(key)
         local edited = A.DesignLayout(f) and A.DesignLayout(f)[key]
-        local group = edited and key or position
+        local group = edited
+                and ((edited.x or 0) ~= 0 or (edited.y or 0) ~= 0 or (edited.scale or 1) ~= 1)
+                and key
+            or position
+        if not rows[group] then
+            order[#order + 1] = group
+        end
         placements[group] = { position, key }
         rows[group] = rows[group] or {}
         table.insert(rows[group], filter)
@@ -1060,22 +1521,14 @@ local function nativeAuras(f, u, enabled)
             addFilter('buffPosition', buffFilter)
         end
         if A.PlateOption(f, 'debuffs') then
-            if
-                A.AuraPosition('debuffPosition') == A.AuraPosition('controlPosition')
-                and not (
-                    A.DesignLayout(f)
-                    and (A.DesignLayout(f).debuffPosition or A.DesignLayout(f).controlPosition)
-                )
-            then
-                addFilter('debuffPosition', 'HARMFUL')
-            else
-                addFilter('debuffPosition', harmfulFilter)
-                addFilter('controlPosition', controlFilter)
-            end
+            addFilter('debuffPosition', harmfulFilter)
+            addFilter('controlPosition', controlFilter)
         end
     end
     local activeRows = {}
-    for group, filters in pairs(rows) do
+    for _, group in ipairs(order) do
+        local filters = rows[group]
+        local occupiedBefore = #occupied
         local position, key = unpack(placements[group])
         local signature = table.concat(filters, ';')
             .. '|'
@@ -1119,27 +1572,13 @@ local function nativeAuras(f, u, enabled)
                             local rim = visual:CreateTexture(nil, 'BACKGROUND')
                             button.rim = rim
                             rim:SetAllPoints()
-                            if pulsing then
-                                rim:SetColorTexture(1, 0.76, 0.24, 1)
-                            elseif helpful then
-                                rim:SetColorTexture(0.18, 0.9, 0.32, 1)
-                            else
-                                rim:SetColorTexture(0.95, 0.15, 0.19, 1)
-                            end
-                            art:SetPoint('TOPLEFT', 2, -2)
-                            art:SetPoint('BOTTOMRIGHT', -2, 2)
+                            local kind = helpful and 'buff'
+                                or filter == controlFilter and 'control'
+                                or 'debuff'
                             art:SetTexCoord(0.07, 0.93, 0.07, 0.93)
-                            if pulsing then
-                                -- Paint the ring above the native sweep, on the same animated parent.
-                                local outline = CreateFrame('Frame', nil, visual)
-                                outline:SetAllPoints()
-                                outline:EnableMouse(false)
-                                outline:SetFrameLevel(visual:GetFrameLevel() + 6)
-                                local ring = outline:CreateTexture(nil, 'OVERLAY')
-                                ring:SetAllPoints()
-                                ring:SetTexture('Interface\\AddOns\\RaynnaNameplates\\AuraPulseRing')
-                                ring:SetVertexColor(1, 0.76, 0.24, 1)
-                            end
+                            container.rnpBorders = container.rnpBorders or {}
+                            table.insert(container.rnpBorders, { art = art, rim = rim, kind = kind })
+                            styleAuraBorder(art, rim, kind)
                             if captionOnly then
                                 visual:Hide()
                             else
@@ -1164,7 +1603,10 @@ local function nativeAuras(f, u, enabled)
                                 timer:SetJustifyH('CENTER')
                                 timer:Show()
                                 f.nativeThreatIcons = f.nativeThreatIcons or {}
-                                table.insert(f.nativeThreatIcons, { icon = button, timer = timer })
+                                table.insert(
+                                    f.nativeThreatIcons,
+                                    { icon = button, timer = timer, container = container }
+                                )
                             end
                             local linear = A.db.auraSweep ~= false
                                 and (A.db.auraSweepStyle or 'Circle') ~= 'Circle'
@@ -1199,8 +1641,29 @@ local function nativeAuras(f, u, enabled)
             end
             local _, _, mult = A.DesignerAura(key, f)
             local scale = (A.db.auraScale or 100) * mult / 100
+            for _, border in ipairs(container.rnpBorders or {}) do
+                styleAuraBorder(border.art, border.rim, border.kind)
+            end
+            container.rnpRow = group
             container:SetScale(scale)
-            anchorAura(container, f, position, 0, 6 * #filters, 21 * scale, scale, key)
+            -- All visual layers of a native aura row occupy the same slots.
+            while #occupied > occupiedBefore do
+                table.remove(occupied)
+            end
+            anchorAura(
+                container,
+                f,
+                position,
+                0,
+                6 * #filters,
+                21 * scale,
+                scale,
+                key,
+                occupied,
+                nil,
+                nil,
+                6 * #filters * 21 * scale
+            )
             container:SetUnit(u)
             container:SetEnabled(true)
             container:Show()
@@ -1212,6 +1675,7 @@ local function nativeAuras(f, u, enabled)
             container:Hide()
         end
     end
+    placeAuraTimers(occupied, f)
     return supported
 end
 local function accessible(t)
@@ -1280,7 +1744,7 @@ local function auras(f, u, samples)
                     if not accessible(a) then
                         break
                     end
-                    local helpful = helpfulQuery or (samples and a.helpful)
+                    local helpful = (not samples and helpfulQuery) or (samples and a.helpful)
                     local id = a.auraInstanceID
                     local unique = readable(id) and id
                     if not unique and readable(a.spellId) and readable(a.sourceUnit) and a.spellId then
@@ -1345,19 +1809,17 @@ local function auras(f, u, samples)
                             bottom = bottom + 1
                         end
                         local position = A.AuraPosition(key)
-                        if A.DesignLayout(f) and A.DesignLayout(f)[key] then
-                            position = key
-                        end
                         positions[position] = positions[position] or {}
                         table.insert(positions[position], box)
-                        box.rim:SetColorTexture(0.95, 0.15, 0.19, 1)
+                        local kind = key:gsub('Position$', '')
+                        styleAuraBorder(box.art, box.rim, kind)
+                        if box.rnpPulseArt then
+                            styleAuraBorder(box.rnpPulseArt.art, box.rnpPulseArt.rim, kind)
+                        end
                         box.aura, box.unit, box.index, box.filter =
                             a, u, i, helpful and 'HELPFUL' or 'HARMFUL'
                         if not samples then
                             box.filter = query
-                        end
-                        if helpful then
-                            box.rim:SetColorTexture(0.18, 0.9, 0.32, 1)
                         end
                         box.art:SetTexture(a.icon)
                         if
@@ -1453,20 +1915,16 @@ local function auras(f, u, samples)
             end
         end
     end
-    for position, icons in pairs(positions) do
-        for index, icon in ipairs(icons) do
-            anchorAura(
-                icon,
-                f,
-                A.AuraPosition(icon.designKey),
-                index - 1,
-                #icons,
-                icon:GetWidth(),
-                1,
-                icon.designKey
-            )
+    local occupied, timers = {}, {}
+    for _, position in ipairs(A.auraPositions) do
+        if positions[position] then
+            packAuraRows(f, position, positions[position], occupied, timers)
         end
     end
+    if f.designerSettings then
+        f.designerPositions = positions
+    end
+    placeAuraTimers(timers, f)
     for i = count + 1, #f.icons do
         f.icons[i]:Hide()
     end
@@ -1474,7 +1932,7 @@ local function auras(f, u, samples)
         A.DesignerVisibility(icon, icon.designKey and (A.DesignLayout(f) or {})[icon.designKey])
     end
     positionThreat(f)
-    A.DesignThreat(f)
+    positionDistance(f)
 end
 function A.PersonalIndicators(frame)
     if not frame.cast then
@@ -1880,6 +2338,8 @@ local function refresh(f, u)
     auras(f, u)
     A.UpdateParty(f, u)
     A.DesignPlate(f)
+    positionThreat(f)
+    positionDistance(f)
 end
 -- Blizzard pools unit frames independently of the nameplate anchors.
 local owners, hooked = {}, {}
@@ -2071,6 +2531,7 @@ function A.RefreshPlateDistances()
         frame.distance:SetShown(show and not frame.objectOnly or false)
         if show and not frame.objectOnly then
             frame.distance:SetText(rangeText(distance, low, high))
+            positionDistance(frame)
         end
         A.DesignerVisibility(frame.distance, (A.DesignLayout(frame) or {}).distance)
     end
@@ -2191,13 +2652,14 @@ function A.PreviewMode()
     end
     return A.previewModes[1], 1
 end
-local function drawSample(f, mode, previewSelected)
+local function drawSample(f, mode, previewSelected, category)
     if f.partyIcon then
         f.partyIcon:Hide()
         f.partyText:Hide()
     end
     f.designType = mode.designType or (mode.npc and 'npc') or mode.key
-    local threatPreview = A.previewColor
+    local previewColor = category == 'Colours' and A.previewColor
+    local threatPreview = previewColor
     local threatStates = { aggro = true, pulling = true, partyAggro = true, safe = true }
     showThreat(
         f,
@@ -2245,7 +2707,7 @@ local function drawSample(f, mode, previewSelected)
     nameMarker(f)
     local personal = mode.key == 'personal'
     A.LayoutPersonalParts(f, personal)
-    local target = not personal and (previewSelected or A.db.previewTarget)
+    local target = not personal and previewSelected
     selectPlate(f, target)
     f:SetScale(
         personal and A.db.scale / 100
@@ -2281,7 +2743,7 @@ local function drawSample(f, mode, previewSelected)
     f.health:SetValue(345)
     if mode.npc then
         f.health:SetStatusBarColor(
-            color(f.quest and A.db.questTint and 'quest' or A.previewColor or mode.reaction)
+            color(f.quest and A.db.questTint and 'quest' or previewColor or mode.reaction)
         )
         A.Badge(f, nil, f.name)
         f.power:Hide()
@@ -2310,10 +2772,10 @@ local function drawSample(f, mode, previewSelected)
     f.cast:SetMinMaxValues(0, 4)
     f.cast:SetHeight(A.db.castHeight or 14)
     f.castTime:SetShown(A.db.castTimer ~= false)
-    paintCast(f, A.previewLockedCast == true)
+    paintCast(f, (category == 'Castbar' or category == 'Colours') and A.previewLockedCast == true)
     f.castText:SetText('Frostbolt')
     f.cast:SetShown(A.PlateOption(f, 'casts'))
-    auras(f, nil, {
+    local examples = {
         {
             helpful = true,
             canApplyAura = true,
@@ -2325,7 +2787,28 @@ local function drawSample(f, mode, previewSelected)
         },
         { spellId = 1822, name = 'Rake', icon = 132152, duration = 8, expirationTime = now + 8 },
         { spellId = 122, icon = 135848, duration = 5, expirationTime = now + 5 },
-    })
+    }
+
+    if f.designerSettings then
+        local function example(id, name, icon, seconds, helpful)
+            examples[#examples + 1] = {
+                spellId = id,
+                name = name,
+                icon = icon,
+                duration = seconds,
+                expirationTime = now + seconds,
+                helpful = helpful,
+                canApplyAura = helpful,
+            }
+        end
+        example(21562, 'Power Word: Fortitude', 135941, 28, true)
+        example(1126, 'Mark of the Wild', 136078, 17, true)
+        example(589, 'Shadow Word: Pain', 136207, 14)
+        example(8921, 'Moonfire', 136096, 9)
+        example(118, 'Polymorph', 136071, 11)
+        example(853, 'Hammer of Justice', 135963, 4)
+    end
+    auras(f, nil, examples)
     A.UpdateParty(f, nil, mode.party)
     A.DesignPlate(f)
 end
@@ -2387,6 +2870,54 @@ function A.TogglePulseDebug()
     end
 end
 
+-- Build disabled examples with temporary preview options. The real profile
+-- is restored before any inspector callbacks or live plate refresh.
+local function drawDesignerSample(f, mode)
+    local personal = mode.key == 'personal'
+    local enemy = mode.key == 'enemyPlayerScale'
+    local function key(option, own)
+        return personal and own or A.PlayerOptionKey(option, enemy)
+    end
+    local settings = {
+        distance = 'showDistance',
+        level = personal and 'personalLevel' or 'showLevelText',
+        value = 'showHealthText',
+        threat = 'showThreat',
+        cast = personal and 'personalCasts' or 'casts',
+        castTime = 'castTimer',
+        buffPosition = personal and 'personalBuffs' or 'buffs',
+        debuffPosition = personal and 'personalDebuffs' or 'debuffs',
+        controlPosition = personal and 'personalDebuffs' or 'debuffs',
+        guild = key('showGuild', 'personalGuild'),
+        classBadge = key('badges', 'personalBadge'),
+        power = key('power', 'personalPower'),
+        powerValue = key('powerValue', 'personalPowerValue'),
+        partyIcon = 'partyIcon',
+        partyText = 'partyLabel',
+        petName = 'showCompanionText',
+        petOwner = 'showCompanionText',
+        questBadge = 'questIcon',
+        serviceQuest = 'questIcon',
+    }
+    if personal then
+        settings.name = 'personalName'
+        settings.health = 'personalHealth'
+    end
+    local saved = A.db
+    local preview = setmetatable({}, { __index = saved })
+    local disabled = {}
+    for part, setting in pairs(settings) do
+        disabled[part] = not saved[setting]
+        preview[setting] = true
+    end
+    f.designerSettings, f.designerDisabled = settings, disabled
+    A.db = preview
+    local ok, err = pcall(drawSample, f, mode, false)
+    A.db = saved
+    if not ok then
+        error(err, 0)
+    end
+end
 function A.DrawAuraExample(parent)
     if parent.designerMode then
         parent.samplesByType = parent.samplesByType or {}
@@ -2404,6 +2935,13 @@ function A.DrawAuraExample(parent)
         parent:SetScript('OnUpdate', function(frame, elapsed)
             if frame.designerDragging then
                 return
+            end
+            if frame.pendingAuraLayout then
+                local pending = frame.pendingAuraLayout
+                frame.pendingAuraLayout = nil
+                if frame.sample == pending then
+                    A.RefreshDesignerTimers(pending)
+                end
             end
             frame.exampleElapsed = (frame.exampleElapsed or 0) + elapsed
             if frame.exampleElapsed >= 3.8 then
@@ -2435,7 +2973,11 @@ function A.DrawAuraExample(parent)
         mode = A.previewModes[2]
     end
     mode = parent.designerMode or mode
-    drawSample(parent.sample, mode, category == 'Targeting')
+    if parent.designerMode then
+        drawDesignerSample(parent.sample, mode)
+    else
+        drawSample(parent.sample, mode, category == 'Targeting', category)
+    end
     A.DesignPlate(parent.sample)
     local scale = parent.sample:GetScale() * UIParent:GetEffectiveScale() / parent:GetEffectiveScale()
     if parent.PositionCamera then
@@ -2443,6 +2985,10 @@ function A.DrawAuraExample(parent)
         parent:PositionCamera()
     else
         parent.sample:SetScale(scale)
+    end
+    if parent.designerMode then
+        A.RefreshDesignerTimers(parent.sample)
+        parent.pendingAuraLayout = parent.sample
     end
 end
 local function refreshPreview()
@@ -2510,7 +3056,7 @@ local function refreshPreview()
     local heights = { 0, 0 }
     local width = 0
     for index, mode in ipairs(modes) do
-        drawSample(preview.samples[index], mode)
+        drawSample(preview.samples[index], mode, A.db.previewTarget)
         width = math.max(width, 240 * preview.samples[index]:GetScale())
     end
     for index, mode in ipairs(modes) do

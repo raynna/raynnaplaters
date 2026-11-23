@@ -543,6 +543,13 @@ function A.NewProfile()
         auraSweepStyle = 'Circle',
         auraPulse = true,
         auraScale = 100,
+        buffBorderWidth = 2,
+        buffBorderColor = '2EE652',
+        debuffBorderWidth = 2,
+        debuffBorderColor = 'F22630',
+        controlBorderWidth = 2,
+        controlBorderColor = 'B35CFF',
+
         buffPosition = 'Top left',
         debuffPosition = 'Bottom left',
         controlPosition = 'Bottom left',
@@ -684,7 +691,16 @@ events:SetScript('OnEvent', function(_, event)
         end
         A.InitEnemyOptions(A.db)
         for key, value in pairs(A.NewProfile()) do
-            if A.db[key] == nil and (key == 'textOutline' or key == 'textShadow' or key:match('Text$')) then
+            if
+                A.db[key] == nil
+                and (
+                    key == 'textOutline'
+                    or key == 'textShadow'
+                    or key:match('Text$')
+                    or key:match('BorderWidth$')
+                    or key:match('BorderColor$')
+                )
+            then
                 A.db[key] = value
             end
         end

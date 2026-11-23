@@ -1,7 +1,7 @@
 local _, A = ...
 
 A.partyDefaults = {
-    partyIcon = false,
+    partyIcon = true,
     partyLabel = false,
     partyLabelText = 'Party',
     partyHealthTint = false,
