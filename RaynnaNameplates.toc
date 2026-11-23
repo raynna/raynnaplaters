@@ -2,7 +2,7 @@
 ## IconTexture: Interface\AddOns\RaynnaNameplates\AddonIcon
 ## Title: Raynna's Nameplates
 ## Notes: Customizable WoW Forever nameplates with threat colours, cast bars, aura tracking and live previews.
-## Version: 1.4.77
+## Version: 1.7.4
 ## OptionalDeps: Plater, Blizzard_AuraContainer
 ## SavedVariablesPerCharacter: RaynnaNameplatesDB
 SettingsRegistry.lua
@@ -14,6 +14,7 @@ Services.lua
 InteractionData.lua
 VendorItems.lua
 Quest.lua
+Party.lua
 Designer.lua
 World.lua
 Launcher.lua
