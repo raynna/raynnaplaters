@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.7.34
+
+- Hold an arrow key to keep moving the selected component. Tap for a 1 px nudge or hold Shift for 10 px steps.
+- Nudging a health, resource or cast bar moves its text along with it and preserves custom text offsets.
+
 ## 1.7.33 · 24 November 2026
 
 ### Designer

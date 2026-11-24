@@ -772,6 +772,7 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
     A.SizeScrollThumb(viewport)
     inspector:SetWidth(240)
     local panels, headers = {}, {}
+    local barFor = { value = 'health', powerValue = 'power', castText = 'cast', castTime = 'cast' }
     local function buildPanel(selected)
         local panel = CreateFrame('Frame', nil, sections)
         panel:SetSize(210, 408)
@@ -835,6 +836,23 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
             local part = { x = 0, y = 0, scale = 1 }
             for k, v in pairs(layout[key] or {}) do
                 part[k] = v
+            end
+            if field == 'x' or field == 'y' then
+                local frame = sample.sample
+                local delta = value - (part[field] or 0)
+                for child, bar in pairs(barFor) do
+                    if bar == key and frame[child] and frame[bar] then
+                        local x, y, scale = A.DesignerAura(child, frame)
+                        local caption = { x = x, y = y, scale = scale }
+                        for k, v in pairs(layout[child] or {}) do
+                            caption[k] = v
+                        end
+                        local ratio = frame[bar]:GetParent():GetEffectiveScale()
+                            / frame[child]:GetParent():GetEffectiveScale()
+                        caption[field] = caption[field] + delta * ratio
+                        layout[child] = caption
+                    end
+                end
             end
             part[field] = value
             layout[key] = part
@@ -1178,23 +1196,50 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
     end
     window:EnableKeyboard(true)
     window:SetPropagateKeyboardInput(true)
-    window:SetScript('OnKeyDown', function(self, key)
-        local delta = { LEFT = { -1, 0 }, RIGHT = { 1, 0 }, UP = { 0, 1 }, DOWN = { 0, -1 } }
-        local focused = GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus()
-        local move = delta[key]
-        local consume = move and inspector:IsShown() and not focused and not sample.designerDragging
-        self:SetPropagateKeyboardInput(not consume)
-        if not consume then
+    local arrows = { LEFT = { 'x', -1 }, RIGHT = { 'x', 1 }, UP = { 'y', 1 }, DOWN = { 'y', -1 } }
+    local heldKey, delay
+    local function canNudge()
+        return inspector:IsShown()
+            and not cleared
+            and not sample.designerDragging
+            and not (GetCurrentKeyBoardFocus and GetCurrentKeyBoardFocus())
+    end
+    local function nudge(key)
+        local move = arrows[key]
+        local x, y = A.DesignerAura(parts[selected][1], sample.sample)
+        property(move[1], (move[1] == 'x' and x or y) + move[2] * (IsShiftKeyDown() and 10 or 1))
+    end
+    local function stopRepeat()
+        heldKey = nil
+        window:SetScript('OnUpdate', nil)
+    end
+    local function repeatArrow(_, elapsed)
+        if not canNudge() then
+            stopRepeat()
             return
         end
-        local step = IsShiftKeyDown() and 10 or 1
-        local x, y = A.DesignerAura(parts[selected][1], sample.sample)
-        if move[1] ~= 0 then
-            property('x', x + move[1] * step)
-        else
-            property('y', y + move[2] * step)
+        delay = delay - elapsed
+        if delay <= 0 then
+            nudge(heldKey)
+            delay = 0.075
+        end
+    end
+    window:SetScript('OnKeyDown', function(self, key)
+        local consume = arrows[key] and canNudge()
+        self:SetPropagateKeyboardInput(not consume)
+        if consume and heldKey ~= key then
+            heldKey, delay = key, 0.32
+            nudge(key)
+            self:SetScript('OnUpdate', repeatArrow)
         end
     end)
+    window:SetScript('OnKeyUp', function(_, key)
+        if key == heldKey then
+            stopRepeat()
+        end
+    end)
+    window:HookScript('OnHide', stopRepeat)
+    inspector:HookScript('OnHide', stopRepeat)
     local function hitRect(region, key)
         local x, y, w, h = region:GetRect()
         if x and key == 'castText' and region.GetStringWidth then
@@ -1313,7 +1358,6 @@ function A.BuildDesigner(row, button, label, changed, existingRow, designerRows)
         end
         return dx + (bestX or 0), dy + (bestY or 0)
     end
-    local barFor = { value = 'health', powerValue = 'power', castText = 'cast', castTime = 'cast' }
     local function union(a, b)
         if not a then
             return b
